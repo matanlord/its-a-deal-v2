@@ -2,6 +2,7 @@ const express = require("express");
 const path = require("path");
 const http = require("http");
 const { Server } = require("socket.io");
+const PDFDocument = require("pdfkit");
 
 const ADMIN_PASSWORD = "CHANGE_ME_ADMIN_PASSWORD"; // TODO: change this before deploy
 
@@ -137,7 +138,7 @@ app.post("/api/trades", (req, res) => {
     toId,
     give: String(give).trim(),
     take: String(take).trim(),
-    status: "OPEN", // OPEN | ACCEPTED | DECLINED | CANCELLED
+    status: "OPEN", // OPEN | ACCEPTED | DECLINED | CANCELLED | BROKEN
     createdAt: now(),
     decidedAt: null
   };
@@ -147,7 +148,7 @@ app.post("/api/trades", (req, res) => {
   res.json(trade);
 });
 
-// update trade status
+// update trade status (accept / decline / cancel / break)
 app.patch("/api/trades/:id", (req, res) => {
   const tradeId = req.params.id;
   const { action } = req.body || {};
@@ -156,11 +157,12 @@ app.patch("/api/trades/:id", (req, res) => {
   if (!trade) {
     return res.status(404).json({ error: "trade not found" });
   }
-  if (trade.status !== "OPEN") {
+  if (trade.status !== "OPEN" && action !== "break") {
+    // only ACCEPTED trades can be broken, others can't change
     return res.status(400).json({ error: "trade already decided" });
   }
 
-  if (!["accept", "decline", "cancel"].includes(action)) {
+  if (!["accept", "decline", "cancel", "break"].includes(action)) {
     return res.status(400).json({ error: "invalid action" });
   }
 
@@ -170,12 +172,71 @@ app.patch("/api/trades/:id", (req, res) => {
     trade.status = "DECLINED";
   } else if (action === "cancel") {
     trade.status = "CANCELLED";
+  } else if (action === "break") {
+    if (trade.status !== "ACCEPTED") {
+      return res.status(400).json({ error: "only accepted trades can be broken" });
+    }
+    trade.status = "BROKEN";
   }
 
   trade.decidedAt = now();
 
   broadcastState();
   res.json(trade);
+});
+
+// generate PDF contract for a trade
+app.get("/api/trades/:id/pdf", (req, res) => {
+  const tradeId = req.params.id;
+  const trade = trades.find(t => t.id === tradeId);
+  if (!trade) {
+    return res.status(404).json({ error: "trade not found" });
+  }
+
+  const fromUser = usersById[trade.fromId];
+  const toUser = usersById[trade.toId];
+
+  const fromName = fromUser ? fromUser.name : trade.fromId;
+  const toName = toUser ? toUser.name : trade.toId;
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="deal_${trade.id}.pdf"`
+  );
+
+  const doc = new PDFDocument({ margin: 50 });
+  doc.pipe(res);
+
+  doc.fontSize(20).text("חוזה דיל - ITS A DEAL", { align: "center" });
+  doc.moveDown();
+
+  doc.fontSize(12);
+  doc.text("תאריך יצירת הדיל: " + new Date(trade.createdAt).toLocaleString("he-IL"), {
+    align: "right"
+  });
+  doc.moveDown();
+
+  doc.text("צד א': " + fromName, { align: "right" });
+  doc.text("צד ב': " + toName, { align: "right" });
+  doc.moveDown();
+
+  doc.text("מה צד א' נותן:", { align: "right", underline: true });
+  doc.text(trade.give, { align: "right" });
+  doc.moveDown();
+
+  doc.text("מה צד ב' נותן:", { align: "right", underline: true });
+  doc.text(trade.take, { align: "right" });
+  doc.moveDown(2);
+
+  doc.text("סטטוס נוכחי של הדיל: " + trade.status, { align: "right" });
+  doc.moveDown(2);
+
+  doc.text("חתימת צד א': ____________________", { align: "right" });
+  doc.moveDown();
+  doc.text("חתימת צד ב': ____________________", { align: "right" });
+
+  doc.end();
 });
 
 // ===== SIMPLE ADMIN API (password-based) =====
@@ -254,5 +315,5 @@ io.on("connection", (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("ITS A DEAL v6 listening on http://localhost:" + PORT);
+  console.log("ITS A DEAL v7 listening on http://localhost:" + PORT);
 });

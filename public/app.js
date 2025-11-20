@@ -1,12 +1,14 @@
-// ITS A DEAL v6 – frontend logic
+// ITS A DEAL v7 – frontend logic
 // - no user switching
 // - per-user password
 // - one account per device (client + server enforcement)
 // - deviceId sent to server so admin can see which user שייך לאיזה מכשיר
+// - PDF contract per deal
+// - break deal option for accepted deals
 (() => {
-  const DEVICE_LOCK_KEY = "its_a_deal_v6_device_locked";
-  const DEVICE_NAME_KEY = "its_a_deal_v6_device_name";
-  const DEVICE_ID_KEY = "its_a_deal_v6_device_id";
+  const DEVICE_LOCK_KEY = "its_a_deal_v7_device_locked";
+  const DEVICE_NAME_KEY = "its_a_deal_v7_device_name";
+  const DEVICE_ID_KEY = "its_a_deal_v7_device_id";
 
   let socket = null;
   let currentUserId = null;
@@ -153,7 +155,7 @@
         }
         document.getElementById("giveText").value = "";
         document.getElementById("takeText").value = "";
-        createDealMessage.textContent = "הדיל נשלח ✅";
+        createDealMessage.textContent = "הדיל נשלח ✅ (נוצר חוזה PDF לשני הצדדים)";
         createDealMessage.classList.add("ok");
       } catch (err) {
         console.error(err);
@@ -172,6 +174,7 @@
         renderCurrentUserInfo();
         renderUsersList();
         renderInbox();
+        renderApprovedDeals();
         renderScoreboard();
       } catch (err) {
         console.error("boot error", err);
@@ -186,6 +189,7 @@
         renderCurrentUserInfo();
         renderUsersList();
         renderInbox();
+        renderApprovedDeals();
         renderScoreboard();
       });
 
@@ -245,6 +249,10 @@
         });
     }
 
+    function openPdf(tradeId) {
+      window.open("/api/trades/" + tradeId + "/pdf", "_blank");
+    }
+
     function renderInbox() {
       const inboxContainer = document.getElementById("inboxContainer");
       inboxContainer.innerHTML = "";
@@ -291,6 +299,11 @@
           const actions = document.createElement("div");
           actions.className = "deal-actions";
 
+          const btnPdf = document.createElement("button");
+          btnPdf.className = "btn small";
+          btnPdf.textContent = "📄 חוזה PDF";
+          btnPdf.addEventListener("click", () => openPdf(t.id));
+
           const btnAccept = document.createElement("button");
           btnAccept.className = "btn small accept";
           btnAccept.textContent = "קבל ✅";
@@ -305,6 +318,7 @@
             updateTrade(t.id, "decline");
           });
 
+          actions.appendChild(btnPdf);
           actions.appendChild(btnAccept);
           actions.appendChild(btnReject);
 
@@ -313,6 +327,84 @@
           item.appendChild(actions);
 
           inboxContainer.appendChild(item);
+        });
+    }
+
+    function renderApprovedDeals() {
+      const container = document.getElementById("approvedDealsContainer");
+      container.innerHTML = "";
+
+      if (!currentUserId) return;
+
+      const mine = trades.filter(
+        (t) =>
+          t.status === "ACCEPTED" &&
+          (t.fromId === currentUserId || t.toId === currentUserId)
+      );
+
+      if (mine.length === 0) {
+        const p = document.createElement("p");
+        p.textContent = "אין דילים מאושרים כרגע.";
+        p.style.fontSize = "13px";
+        p.style.opacity = "0.8";
+        container.appendChild(p);
+        return;
+      }
+
+      mine
+        .slice()
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .forEach((t) => {
+          const item = document.createElement("div");
+          item.className = "deal-item";
+
+          const otherId = t.fromId === currentUserId ? t.toId : t.fromId;
+          const otherName = getUserName(otherId);
+
+          const header = document.createElement("div");
+          header.className = "deal-header";
+          header.innerHTML =
+            "דיל מאושר בינך לבין <strong>" + otherName + "</strong>";
+
+          const body = document.createElement("div");
+          body.className = "deal-body";
+
+          const pGive = document.createElement("p");
+          pGive.innerHTML =
+            "<strong>מה נותן " + getUserName(t.fromId) + ":</strong> " + t.give;
+
+          const pTake = document.createElement("p");
+          pTake.innerHTML =
+            "<strong>מה נותן " + getUserName(t.toId) + ":</strong> " + t.take;
+
+          body.appendChild(pGive);
+          body.appendChild(pTake);
+
+          const actions = document.createElement("div");
+          actions.className = "deal-actions";
+
+          const btnPdf = document.createElement("button");
+          btnPdf.className = "btn small";
+          btnPdf.textContent = "📄 חוזה PDF";
+          btnPdf.addEventListener("click", () => openPdf(t.id));
+
+          const btnBreak = document.createElement("button");
+          btnBreak.className = "btn small reject";
+          btnBreak.textContent = "שבירת דיל";
+          btnBreak.addEventListener("click", () => {
+            if (confirm("אתה בטוח שהדיל נשבר ביניכם?")) {
+              updateTrade(t.id, "break");
+            }
+          });
+
+          actions.appendChild(btnPdf);
+          actions.appendChild(btnBreak);
+
+          item.appendChild(header);
+          item.appendChild(body);
+          item.appendChild(actions);
+
+          container.appendChild(item);
         });
     }
 
@@ -344,6 +436,7 @@
         };
       });
 
+      // רק דילים מאושרים (לא שבורים) נספרים
       trades
         .filter((t) => t.status === "ACCEPTED")
         .forEach((t) => {
