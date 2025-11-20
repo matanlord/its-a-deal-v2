@@ -11,7 +11,7 @@
 <body>
   <div id="registerOverlay" class="overlay">
     <div class="overlay-card">
-      <h2>ברוך הבא ל‑ITS A DEAL v2</h2>
+      <h2>ברוך הבא ל-ITS A DEAL v2</h2>
       <p>פעם ראשונה? תכתוב את השם שלך כדי להצטרף ללוח הדילים.</p>
       <input type="text" id="registerName" placeholder="שם / כינוי" />
       <button id="registerBtn" class="btn primary">הצטרף</button>
@@ -28,6 +28,8 @@
     <section class="card">
       <h2>משתמש נוכחי</h2>
       <p class="info" id="currentUserInfo"></p>
+      <h3 style="font-size:14px; margin-top:10px;">משתמשים רשומים:</h3>
+      <ul id="usersListNames" style="font-size:13px; margin:4px 0 0; padding-right:18px;"></ul>
     </section>
 
     <section class="card">
@@ -54,7 +56,7 @@
     </section>
 
     <section class="card">
-      <h2>לוח דילים ‑ מי חייב למי</h2>
+      <h2>לוח דילים - מי חייב למי</h2>
       <table class="score-table">
         <thead>
           <tr>

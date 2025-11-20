@@ -44,7 +44,7 @@ function broadcastState() {
 
 // ===== REST API =====
 
-// create / login user by name (name -> fixed id, no impersonation)
+// create user – name is unique, cannot be reused by someone else
 app.post("/api/join", (req, res) => {
   const rawName = (req.body && req.body.name) || "";
   const name = String(rawName).trim();
@@ -53,14 +53,12 @@ app.post("/api/join", (req, res) => {
     return res.status(400).json({ error: "name is required" });
   }
 
-  // if user with this name already exists – return same user (login)
-  const existing = Object.values(usersById).find(u => u.name === name);
-  if (existing) {
-    existing.lastSeenAt = now();
-    return res.json(existing);
+  // אם השם כבר בשימוש – לא נותנים למישהו אחר לקחת אותו
+  const exists = Object.values(usersById).find(u => u.name === name);
+  if (exists) {
+    return res.status(400).json({ error: "השם הזה כבר בשימוש, תבחר שם אחר" });
   }
 
-  // otherwise create new user with unique id for this name
   const id = makeId("u");
   const user = {
     id,

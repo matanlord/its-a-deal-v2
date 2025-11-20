@@ -120,6 +120,7 @@
         trades = data.trades || [];
         syncUsersSelects();
         renderCurrentUserInfo();
+        renderUsersList();
         renderInbox();
         renderScoreboard();
       } catch (err) {
@@ -133,6 +134,7 @@
         trades = data.trades || [];
         syncUsersSelects();
         renderCurrentUserInfo();
+        renderUsersList();
         renderInbox();
         renderScoreboard();
       });
@@ -167,6 +169,30 @@
       const currentUserInfo = document.getElementById("currentUserInfo");
       const name = getUserName(currentUserId);
       currentUserInfo.textContent = name ? "אתה מחובר בתור: " + name : "";
+    }
+
+    function renderUsersList() {
+      const ul = document.getElementById("usersListNames");
+      if (!ul) return;
+
+      ul.innerHTML = "";
+
+      if (!users || users.length === 0) {
+        const li = document.createElement("li");
+        li.textContent = "אין עדיין משתמשים רשומים.";
+        li.style.opacity = "0.8";
+        ul.appendChild(li);
+        return;
+      }
+
+      users
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, "he"))
+        .forEach((u) => {
+          const li = document.createElement("li");
+          li.textContent = u.name + (u.id === currentUserId ? " (אתה)" : "");
+          ul.appendChild(li);
+        });
     }
 
     function renderInbox() {
