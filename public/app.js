@@ -6,9 +6,9 @@
 // - PDF contract per deal AFTER ACCEPTED
 // - break deal option only for the sender (fromId) on accepted deals
 (() => {
-  const DEVICE_LOCK_KEY = "its_a_deal_v8_device_locked";
-  const DEVICE_NAME_KEY = "its_a_deal_v8_device_name";
-  const DEVICE_ID_KEY = "its_a_deal_v8_device_id";
+  const DEVICE_LOCK_KEY = "its_a_deal_v10_device_locked";
+  const DEVICE_NAME_KEY = "its_a_deal_v10_device_name";
+  const DEVICE_ID_KEY = "its_a_deal_v10_device_id";
 
   let socket = null;
   let currentUserId = null;
@@ -37,6 +37,47 @@
     const sendDealBtn = document.getElementById("sendDealBtn");
     const createDealMessage = document.getElementById("createDealMessage");
 
+    async function checkDeviceLockWithServer(deviceId) {
+      try {
+        const res = await fetch("/api/device-status?deviceId=" + encodeURIComponent(deviceId));
+        if (!res.ok) return;
+        const data = await res.json();
+        const user = data.user;
+
+        const locked = localStorage.getItem(DEVICE_LOCK_KEY) === "1";
+        const lockedName = localStorage.getItem(DEVICE_NAME_KEY) || "";
+
+        if (!user) {
+          // אין משתמש בשרת למכשיר הזה – מאפסים את הנעילה בצד לקוח
+          localStorage.removeItem(DEVICE_LOCK_KEY);
+          localStorage.removeItem(DEVICE_NAME_KEY);
+
+          registerNameInput.readOnly = false;
+          registerNameInput.classList.remove("readonly");
+          overlayText.textContent =
+            "פעם ראשונה אתה בוחר שם + סיסמה. אחר כך אתה מתחבר עם אותו שם וסיסמה. במכשיר הזה אפשר ליצור רק משתמש אחד.";
+          if (!lockedName) {
+            registerNameInput.value = "";
+          }
+        } else {
+          // יש משתמש ל-deviceId – מסנכרנים את השם
+          if (!locked || lockedName !== user.name) {
+            localStorage.setItem(DEVICE_LOCK_KEY, "1");
+            localStorage.setItem(DEVICE_NAME_KEY, user.name);
+            registerNameInput.value = user.name;
+            registerNameInput.readOnly = true;
+            registerNameInput.classList.add("readonly");
+            overlayText.textContent =
+              "במכשיר הזה כבר נוצר משתמש בשם: " +
+              user.name +
+              ". אתה יכול להתחבר רק אליו עם הסיסמה שבחרת.";
+          }
+        }
+      } catch (e) {
+        console.error("device-status check failed", e);
+      }
+    }
+
     // check device lock (only one user can be created on this device)
     const locked = localStorage.getItem(DEVICE_LOCK_KEY) === "1";
     const lockedName = localStorage.getItem(DEVICE_NAME_KEY) || "";
@@ -44,6 +85,9 @@
     registerOverlay.style.display = "flex";
 
     if (locked && lockedName) {
+      // נבדוק גם מול השרת שהנעילה עדיין רלוונטית
+      checkDeviceLockWithServer(deviceId);
+
       // במכשיר הזה כבר נוצר משתמש – אפשר רק להתחבר אליו
       registerNameInput.value = lockedName;
       registerNameInput.readOnly = true;

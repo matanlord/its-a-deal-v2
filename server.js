@@ -124,6 +124,17 @@ app.post("/api/join", (req, res) => {
   res.json(out);
 });
 
+
+// device status by deviceId – used by client to reset wrong first user after admin delete
+app.get("/api/device-status", (req, res) => {
+  const deviceId = req.query.deviceId;
+  if (!deviceId) {
+    return res.status(400).json({ error: "missing deviceId" });
+  }
+  const user = Object.values(usersById).find(u => u.deviceId === deviceId);
+  res.json({ user: safeUser(user) });
+});
+
 // full state for initial boot
 app.get("/api/boot", (req, res) => {
   res.json(stateSnapshot());
@@ -251,7 +262,7 @@ app.get("/api/trades/:id/pdf", (req, res) => {
   doc.fontSize(20).text("חוזה דיל - ITS A DEAL", {
     align: "center"
   });
-  doc.moveDown();
+  doc.moveDown(2);
 
   // Info
   doc.fontSize(12);
@@ -259,17 +270,23 @@ app.get("/api/trades/:id/pdf", (req, res) => {
   doc.text("תאריך יצירת הדיל: " + created, {
     align: "right"
   });
-  doc.moveDown();
+  doc.moveDown(1);
 
-  doc.text("צד א' (שולח ההצעה): " + fromName, { align: "right" });
-  doc.text("צד ב' (מקבל ההצעה): " + toName, { align: "right" });
-  doc.moveDown();
+  doc.text("צד א' (המציע): " + fromName, { align: "right" });
+  doc.text("צד ב' (המאשר): " + toName, { align: "right" });
+  doc.moveDown(2);
 
   const bodyWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
 
-  doc.text("מה צד א' מתחייב לתת:", {
+  doc.text("פרטי ההתחייבות:", {
     align: "right",
     underline: true,
+    width: bodyWidth
+  });
+  doc.moveDown(1);
+
+  doc.text("• מה צד א' מתחייב לתת:", {
+    align: "right",
     width: bodyWidth
   });
   doc.moveDown(0.3);
@@ -277,11 +294,10 @@ app.get("/api/trades/:id/pdf", (req, res) => {
     align: "right",
     width: bodyWidth
   });
-  doc.moveDown();
+  doc.moveDown(1);
 
-  doc.text("מה צד ב' מתחייב לתת:", {
+  doc.text("• מה צד ב' מתחייב לתת:", {
     align: "right",
-    underline: true,
     width: bodyWidth
   });
   doc.moveDown(0.3);
@@ -294,12 +310,12 @@ app.get("/api/trades/:id/pdf", (req, res) => {
   doc.text("סטטוס נוכחי של הדיל: " + trade.status, {
     align: "right"
   });
-  doc.moveDown(2);
+  doc.moveDown(3);
 
   doc.text("חתימת צד א': ____________________", {
     align: "right"
   });
-  doc.moveDown();
+  doc.moveDown(1);
   doc.text("חתימת צד ב': ____________________", {
     align: "right"
   });
@@ -383,5 +399,5 @@ io.on("connection", (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("ITS A DEAL v9 listening on http://localhost:" + PORT);
+  console.log("ITS A DEAL v10 listening on http://localhost:" + PORT);
 });
