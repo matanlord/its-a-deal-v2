@@ -87,7 +87,7 @@
     table.className = "score-table";
 
     const thead = document.createElement("thead");
-    thead.innerHTML = "<tr><th>שם</th><th>נוצר</th><th>נראה לאחרונה</th><th>סטטוס</th><th>פעולות</th></tr>";
+    thead.innerHTML = "<tr><th>שם</th><th>מכשיר</th><th>נוצר</th><th>נראה לאחרונה</th><th>סטטוס</th><th>פעולות</th></tr>";
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
@@ -97,6 +97,9 @@
 
       const tdName = document.createElement("td");
       tdName.textContent = u.name;
+
+      const tdDevice = document.createElement("td");
+      tdDevice.textContent = u.deviceId || "-";
 
       const tdJoined = document.createElement("td");
       tdJoined.textContent = formatTime(u.joinedAt);
@@ -115,6 +118,7 @@
       tdActions.appendChild(delBtn);
 
       tr.appendChild(tdName);
+      tr.appendChild(tdDevice);
       tr.appendChild(tdJoined);
       tr.appendChild(tdLastSeen);
       tr.appendChild(tdStatus);

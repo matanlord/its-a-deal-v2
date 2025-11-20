@@ -18,7 +18,9 @@ const publicDir = path.join(__dirname, "public");
 app.use(express.static(publicDir));
 
 // ===== data model =====
-// usersById: { [id]: { id, name, password, joinedAt, lastSeenAt } }
+// usersById: {
+//   [id]: { id, name, password, joinedAt, lastSeenAt, deviceId }
+// }
 // trades:   { id, fromId, toId, give, take, status, createdAt, decidedAt }
 const usersById = {};
 const trades = [];
@@ -51,11 +53,14 @@ function broadcastState() {
 // ===== REST API =====
 
 // create / login user – name+password pair
+// adds isNew: true/false so client knows if this device just created first user
 app.post("/api/join", (req, res) => {
   const rawName = (req.body && req.body.name) || "";
   const rawPassword = (req.body && req.body.password) || "";
+  const rawDeviceId = (req.body && req.body.deviceId) || "";
   const name = String(rawName).trim();
   const password = String(rawPassword);
+  const deviceId = rawDeviceId ? String(rawDeviceId) : null;
 
   if (!name) {
     return res.status(400).json({ error: "צריך לכתוב שם" });
@@ -75,22 +80,36 @@ app.post("/api/join", (req, res) => {
       return res.status(400).json({ error: "השם הזה כבר קיים עם סיסמה אחרת" });
     }
     existing.lastSeenAt = now();
-    return res.json(safeUser(existing));
+    const out = safeUser(existing);
+    out.isNew = false;
+    return res.json(out);
   }
 
-  // new user
+  // new user – enforce "one created user per deviceId" if provided
+  if (deviceId) {
+    const takenBy = Object.values(usersById).find(u => u.deviceId === deviceId);
+    if (takenBy) {
+      return res.status(400).json({
+        error: "במכשיר הזה כבר נוצר משתמש בשם: " + takenBy.name
+      });
+    }
+  }
+
   const id = makeId("u");
   const user = {
     id,
     name,
     password,
     joinedAt: now(),
-    lastSeenAt: now()
+    lastSeenAt: now(),
+    deviceId: deviceId || null
   };
   usersById[id] = user;
 
   broadcastState();
-  res.json(safeUser(user));
+  const out = safeUser(user);
+  out.isNew = true;
+  res.json(out);
 });
 
 // full state for initial boot
@@ -235,5 +254,5 @@ io.on("connection", (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("ITS A DEAL v4 listening on http://localhost:" + PORT);
+  console.log("ITS A DEAL v6 listening on http://localhost:" + PORT);
 });

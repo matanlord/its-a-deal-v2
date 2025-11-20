@@ -1,22 +1,56 @@
-// ITS A DEAL v4 – frontend logic (no user switching, per-user password)
+// ITS A DEAL v6 – frontend logic
+// - no user switching
+// - per-user password
+// - one account per device (client + server enforcement)
+// - deviceId sent to server so admin can see which user שייך לאיזה מכשיר
 (() => {
+  const DEVICE_LOCK_KEY = "its_a_deal_v6_device_locked";
+  const DEVICE_NAME_KEY = "its_a_deal_v6_device_name";
+  const DEVICE_ID_KEY = "its_a_deal_v6_device_id";
+
   let socket = null;
   let currentUserId = null;
   let users = [];
   let trades = [];
 
   window.addEventListener("load", () => {
+    // ----- deviceId generation -----
+    let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+    if (!deviceId) {
+      deviceId =
+        "dev_" +
+        Math.random().toString(36).slice(2) +
+        Date.now().toString(36);
+      localStorage.setItem(DEVICE_ID_KEY, deviceId);
+    }
+
     const registerOverlay = document.getElementById("registerOverlay");
     const registerNameInput = document.getElementById("registerName");
     const registerPasswordInput = document.getElementById("registerPassword");
     const registerBtn = document.getElementById("registerBtn");
     const registerError = document.getElementById("registerError");
+    const overlayText = document.getElementById("overlayText");
 
     const dealTargetSelect = document.getElementById("dealTargetSelect");
     const sendDealBtn = document.getElementById("sendDealBtn");
     const createDealMessage = document.getElementById("createDealMessage");
 
+    // check device lock (only one user can be created on this device)
+    const locked = localStorage.getItem(DEVICE_LOCK_KEY) === "1";
+    const lockedName = localStorage.getItem(DEVICE_NAME_KEY) || "";
+
     registerOverlay.style.display = "flex";
+
+    if (locked && lockedName) {
+      // במכשיר הזה כבר נוצר משתמש – אפשר רק להתחבר אליו
+      registerNameInput.value = lockedName;
+      registerNameInput.readOnly = true;
+      registerNameInput.classList.add("readonly");
+      overlayText.textContent =
+        "במכשיר הזה כבר נוצר משתמש בשם: " +
+        lockedName +
+        ". אתה יכול להתחבר רק אליו עם הסיסמה שבחרת.";
+    }
 
     registerBtn.addEventListener("click", async () => {
       registerError.textContent = "";
@@ -27,6 +61,14 @@
         registerError.textContent = "צריך לכתוב שם";
         return;
       }
+
+      // אם המכשיר נעול לשם מסוים – לא מאפשרים להתחבר בשם אחר
+      if (locked && lockedName && name !== lockedName) {
+        registerError.textContent =
+          "במכשיר הזה אפשר להתחבר רק למשתמש: " + lockedName;
+        return;
+      }
+
       if (!password) {
         registerError.textContent = "צריך לבחור סיסמה";
         return;
@@ -40,7 +82,7 @@
         const res = await fetch("/api/join", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, password })
+          body: JSON.stringify({ name, password, deviceId })
         });
         const data = await res.json();
         if (!res.ok) {
@@ -48,6 +90,13 @@
           return;
         }
         currentUserId = data.id;
+
+        // אם זה משתמש חדש – נועל את המכשיר לשם הזה
+        if (data.isNew) {
+          localStorage.setItem(DEVICE_LOCK_KEY, "1");
+          localStorage.setItem(DEVICE_NAME_KEY, name);
+        }
+
         registerOverlay.style.display = "none";
         bootAndConnect();
       } catch (err) {
