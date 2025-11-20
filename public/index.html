@@ -2,7 +2,7 @@
 <html lang="he" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <title>ITS A DEAL v2</title>
+  <title>ITS A DEAL v4</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="style.css" />
   <link rel="manifest" href="manifest.json" />
@@ -11,16 +11,17 @@
 <body>
   <div id="registerOverlay" class="overlay">
     <div class="overlay-card">
-      <h2>ברוך הבא ל-ITS A DEAL v2</h2>
-      <p>פעם ראשונה? תכתוב את השם שלך כדי להצטרף ללוח הדילים.</p>
+      <h2>ברוך הבא ל-ITS A DEAL v4</h2>
+      <p>פעם ראשונה אתה בוחר שם + סיסמה. אחר כך אתה מתחבר עם אותו שם וסיסמה.</p>
       <input type="text" id="registerName" placeholder="שם / כינוי" />
-      <button id="registerBtn" class="btn primary">הצטרף</button>
+      <input type="password" id="registerPassword" placeholder="סיסמה (לפחות 6 תווים, לא רק 4 ספרות)" />
+      <button id="registerBtn" class="btn primary">התחברות / הרשמה</button>
       <p id="registerError" class="status-message error"></p>
     </div>
   </div>
 
   <header class="app-header">
-    <h1>ITS A DEAL v2</h1>
+    <h1>ITS A DEAL v4</h1>
     <p class="subtitle">דילים בלייב לקבוצה סגורה</p>
   </header>
 
@@ -72,7 +73,7 @@
   </main>
 
   <footer class="app-footer">
-    <span>ITS A DEAL v2 – לייב בין כל המשתמשים</span>
+    <span>ITS A DEAL v4 – לייב בין כל המשתמשים</span>
     <span style="margin-right: 10px; opacity:0.7;">
       <a href="/admin.html" style="color:#bbdefb; text-decoration:none;">Admin</a>
     </span>

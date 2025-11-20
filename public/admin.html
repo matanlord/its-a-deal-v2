@@ -11,21 +11,24 @@
 
   <section class="card" id="loginBox">
     <h2>כניסת אדמין</h2>
-    <p>הכנס סיסמת אדמין כדי לראות את כל המשתמשים והדילים.</p>
+    <p>הכנס סיסמת אדמין כדי לראות ולנהל משתמשים ודילים.</p>
     <input id="adminPass" type="password" placeholder="סיסמת אדמין">
     <button id="loginBtn" class="btn primary">כניסה</button>
     <p id="adminError" class="status-message error"></p>
   </section>
 
   <section class="card" id="adminContent" style="display:none;">
-    <h2>מצב מערכת</h2>
-    <h3>משתמשים</h3>
-    <pre id="usersList" style="white-space:pre-wrap; font-size:12px;"></pre>
-    <h3>דילים</h3>
-    <pre id="tradesList" style="white-space:pre-wrap; font-size:12px;"></pre>
+    <h2>משתמשים</h2>
+    <div id="usersList" style="font-size:13px;"></div>
+
+    <h2 style="margin-top:20px;">דילים</h2>
+    <div id="tradesList" style="font-size:13px;"></div>
   </section>
 
 <script>
+  let adminPassword = null;
+  let usersCache = [];
+
   async function adminLogin() {
     const password = document.getElementById("adminPass").value;
     const res = await fetch("/api/admin/login", {
@@ -40,20 +43,161 @@
       return;
     }
 
-    loadAdminData(password);
-  }
-
-  async function loadAdminData(password) {
+    adminPassword = password;
     document.getElementById("loginBox").style.display = "none";
     document.getElementById("adminContent").style.display = "block";
+    loadAdminData();
+  }
 
-    const res = await fetch("/api/admin/state?password=" + encodeURIComponent(password));
+  async function loadAdminData() {
+    const res = await fetch("/api/admin/state?password=" + encodeURIComponent(adminPassword));
     const data = await res.json();
+    usersCache = data.users || [];
+    renderUsers(usersCache);
+    renderTrades(data.trades || []);
+  }
 
-    document.getElementById("usersList").textContent =
-      JSON.stringify(data.users, null, 2);
-    document.getElementById("tradesList").textContent =
-      JSON.stringify(data.trades, null, 2);
+  function formatTime(ts) {
+    if (!ts) return "-";
+    const d = new Date(ts);
+    return d.toLocaleString("he-IL");
+  }
+
+  function isOnline(user) {
+    if (!user.lastSeenAt) return false;
+    const diff = Date.now() - user.lastSeenAt;
+    return diff < 30000; // 30 שניות
+  }
+
+  function idToName(id) {
+    const u = usersCache.find(u => u.id === id);
+    return u ? u.name : id;
+  }
+
+  function renderUsers(users) {
+    const container = document.getElementById("usersList");
+    container.innerHTML = "";
+
+    if (!users.length) {
+      container.textContent = "אין משתמשים.";
+      return;
+    }
+
+    const table = document.createElement("table");
+    table.className = "score-table";
+
+    const thead = document.createElement("thead");
+    thead.innerHTML = "<tr><th>שם</th><th>נוצר</th><th>נראה לאחרונה</th><th>סטטוס</th><th>פעולות</th></tr>";
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+
+    users.forEach(u => {
+      const tr = document.createElement("tr");
+
+      const tdName = document.createElement("td");
+      tdName.textContent = u.name;
+
+      const tdJoined = document.createElement("td");
+      tdJoined.textContent = formatTime(u.joinedAt);
+
+      const tdLastSeen = document.createElement("td");
+      tdLastSeen.textContent = formatTime(u.lastSeenAt);
+
+      const tdStatus = document.createElement("td");
+      tdStatus.textContent = isOnline(u) ? "מחובר עכשיו" : "לא מחובר";
+
+      const tdActions = document.createElement("td");
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn small reject";
+      delBtn.textContent = "מחק";
+      delBtn.onclick = () => deleteUser(u.id);
+      tdActions.appendChild(delBtn);
+
+      tr.appendChild(tdName);
+      tr.appendChild(tdJoined);
+      tr.appendChild(tdLastSeen);
+      tr.appendChild(tdStatus);
+      tr.appendChild(tdActions);
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
+  function renderTrades(trades) {
+    const container = document.getElementById("tradesList");
+    container.innerHTML = "";
+
+    if (!trades.length) {
+      container.textContent = "אין דילים.";
+      return;
+    }
+
+    const table = document.createElement("table");
+    table.className = "score-table";
+
+    const thead = document.createElement("thead");
+    thead.innerHTML = "<tr><th>ID</th><th>מ</th><th>אל</th><th>סטטוס</th><th>נוצר</th><th>פעולות</th></tr>";
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+
+    trades.forEach(t => {
+      const tr = document.createElement("tr");
+
+      const tdId = document.createElement("td");
+      tdId.textContent = t.id;
+
+      const tdFrom = document.createElement("td");
+      tdFrom.textContent = idToName(t.fromId);
+
+      const tdTo = document.createElement("td");
+      tdTo.textContent = idToName(t.toId);
+
+      const tdStatus = document.createElement("td");
+      tdStatus.textContent = t.status;
+
+      const tdCreated = document.createElement("td");
+      tdCreated.textContent = formatTime(t.createdAt);
+
+      const tdActions = document.createElement("td");
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn small reject";
+      delBtn.textContent = "מחק";
+      delBtn.onclick = () => deleteTrade(t.id);
+      tdActions.appendChild(delBtn);
+
+      tr.appendChild(tdId);
+      tr.appendChild(tdFrom);
+      tr.appendChild(tdTo);
+      tr.appendChild(tdStatus);
+      tr.appendChild(tdCreated);
+      tr.appendChild(tdActions);
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
+  async function deleteUser(id) {
+    if (!confirm("למחוק משתמש וכל הדילים שלו?")) return;
+    await fetch("/api/admin/users/" + id + "?password=" + encodeURIComponent(adminPassword), {
+      method: "DELETE"
+    });
+    loadAdminData();
+  }
+
+  async function deleteTrade(id) {
+    if (!confirm("למחוק דיל?")) return;
+    await fetch("/api/admin/trades/" + id + "?password=" + encodeURIComponent(adminPassword), {
+      method: "DELETE"
+    });
+    loadAdminData();
   }
 
   document.getElementById("loginBtn").onclick = adminLogin;

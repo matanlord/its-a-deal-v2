@@ -1,7 +1,5 @@
-// ITS A DEAL v2 – frontend logic (no user switching, id fixed per device)
+// ITS A DEAL v4 – frontend logic (no user switching, per-user password)
 (() => {
-  const STORAGE_KEY = "its_a_deal_v2_user_id";
-
   let socket = null;
   let currentUserId = null;
   let users = [];
@@ -10,6 +8,7 @@
   window.addEventListener("load", () => {
     const registerOverlay = document.getElementById("registerOverlay");
     const registerNameInput = document.getElementById("registerName");
+    const registerPasswordInput = document.getElementById("registerPassword");
     const registerBtn = document.getElementById("registerBtn");
     const registerError = document.getElementById("registerError");
 
@@ -17,36 +16,38 @@
     const sendDealBtn = document.getElementById("sendDealBtn");
     const createDealMessage = document.getElementById("createDealMessage");
 
-    const savedId = localStorage.getItem(STORAGE_KEY);
-    if (!savedId) {
-      registerOverlay.style.display = "flex";
-    } else {
-      currentUserId = savedId;
-      registerOverlay.style.display = "none";
-      bootAndConnect();
-    }
+    registerOverlay.style.display = "flex";
 
     registerBtn.addEventListener("click", async () => {
       registerError.textContent = "";
       const name = (registerNameInput.value || "").trim();
+      const password = registerPasswordInput.value;
+
       if (!name) {
         registerError.textContent = "צריך לכתוב שם";
         return;
       }
+      if (!password) {
+        registerError.textContent = "צריך לבחור סיסמה";
+        return;
+      }
+      if (password.length < 6) {
+        registerError.textContent = "הסיסמה חייבת להיות לפחות 6 תווים";
+        return;
+      }
+
       try {
         const res = await fetch("/api/join", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name })
+          body: JSON.stringify({ name, password })
         });
+        const data = await res.json();
         if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          registerError.textContent = data.error || "שגיאה ביצירת משתמש";
+          registerError.textContent = data.error || "שגיאה בהתחברות";
           return;
         }
-        const user = await res.json();
-        currentUserId = user.id;
-        localStorage.setItem(STORAGE_KEY, currentUserId);
+        currentUserId = data.id;
         registerOverlay.style.display = "none";
         bootAndConnect();
       } catch (err) {
@@ -64,7 +65,7 @@
       const takeText = document.getElementById("takeText").value.trim();
 
       if (!currentUserId) {
-        createDealMessage.textContent = "צריך לבחור משתמש קודם";
+        createDealMessage.textContent = "צריך להתחבר קודם";
         createDealMessage.classList.add("error");
         return;
       }
@@ -139,7 +140,7 @@
         renderScoreboard();
       });
 
-      // ping server so lastSeenAt is updated
+      // ping server so lastSeenAt is updated (for admin "online" view)
       setInterval(() => {
         if (socket && currentUserId) {
           socket.emit("pong:client-alive", currentUserId);

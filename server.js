@@ -18,7 +18,7 @@ const publicDir = path.join(__dirname, "public");
 app.use(express.static(publicDir));
 
 // ===== data model =====
-// usersById: { [id]: { id, name, joinedAt, lastSeenAt } }
+// usersById: { [id]: { id, name, password, joinedAt, lastSeenAt } }
 // trades:   { id, fromId, toId, give, take, status, createdAt, decidedAt }
 const usersById = {};
 const trades = [];
@@ -31,9 +31,15 @@ function makeId(prefix) {
   return prefix + "_" + now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+function safeUser(u) {
+  if (!u) return null;
+  const { password, ...rest } = u;
+  return rest;
+}
+
 function stateSnapshot() {
   return {
-    users: Object.values(usersById),
+    users: Object.values(usersById).map(safeUser),
     trades
   };
 }
@@ -44,32 +50,47 @@ function broadcastState() {
 
 // ===== REST API =====
 
-// create user – name is unique, cannot be reused by someone else
+// create / login user – name+password pair
 app.post("/api/join", (req, res) => {
   const rawName = (req.body && req.body.name) || "";
+  const rawPassword = (req.body && req.body.password) || "";
   const name = String(rawName).trim();
+  const password = String(rawPassword);
 
   if (!name) {
-    return res.status(400).json({ error: "name is required" });
+    return res.status(400).json({ error: "צריך לכתוב שם" });
+  }
+  if (!password) {
+    return res.status(400).json({ error: "צריך סיסמה" });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: "הסיסמה חייבת להיות לפחות 6 תווים" });
   }
 
-  // אם השם כבר בשימוש – לא נותנים למישהו אחר לקחת אותו
-  const exists = Object.values(usersById).find(u => u.name === name);
-  if (exists) {
-    return res.status(400).json({ error: "השם הזה כבר בשימוש, תבחר שם אחר" });
+  const existing = Object.values(usersById).find(u => u.name === name);
+
+  if (existing) {
+    // login case
+    if (existing.password !== password) {
+      return res.status(400).json({ error: "השם הזה כבר קיים עם סיסמה אחרת" });
+    }
+    existing.lastSeenAt = now();
+    return res.json(safeUser(existing));
   }
 
+  // new user
   const id = makeId("u");
   const user = {
     id,
     name,
+    password,
     joinedAt: now(),
     lastSeenAt: now()
   };
   usersById[id] = user;
 
   broadcastState();
-  res.json(user);
+  res.json(safeUser(user));
 });
 
 // full state for initial boot
@@ -158,6 +179,44 @@ app.get("/api/admin/state", (req, res) => {
   res.json(stateSnapshot());
 });
 
+// delete user (and all their trades)
+app.delete("/api/admin/users/:id", (req, res) => {
+  const pass = req.query.password;
+  if (pass !== ADMIN_PASSWORD) {
+    return res.status(403).json({ error: "forbidden" });
+  }
+  const id = req.params.id;
+  if (!usersById[id]) {
+    return res.status(404).json({ error: "user not found" });
+  }
+  delete usersById[id];
+
+  for (let i = trades.length - 1; i >= 0; i--) {
+    if (trades[i].fromId === id || trades[i].toId === id) {
+      trades.splice(i, 1);
+    }
+  }
+
+  broadcastState();
+  res.json({ ok: true });
+});
+
+// delete trade
+app.delete("/api/admin/trades/:id", (req, res) => {
+  const pass = req.query.password;
+  if (pass !== ADMIN_PASSWORD) {
+    return res.status(403).json({ error: "forbidden" });
+  }
+  const id = req.params.id;
+  const idx = trades.findIndex(t => t.id === id);
+  if (idx === -1) {
+    return res.status(404).json({ error: "trade not found" });
+  }
+  trades.splice(idx, 1);
+  broadcastState();
+  res.json({ ok: true });
+});
+
 // ===== Socket.IO =====
 io.on("connection", (socket) => {
   console.log("client connected", socket.id);
@@ -176,5 +235,5 @@ io.on("connection", (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("ITS A DEAL v2 listening on http://localhost:" + PORT);
+  console.log("ITS A DEAL v4 listening on http://localhost:" + PORT);
 });

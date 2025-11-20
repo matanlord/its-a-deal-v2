@@ -1,4 +1,4 @@
-// Simple placeholder service worker for ITS A DEAL v2
+// Simple placeholder service worker for ITS A DEAL v4
 self.addEventListener("install", () => {
   self.skipWaiting();
 });
