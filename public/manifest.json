@@ -1,3 +1,11 @@
 {
-  "name": "ITS A DEAL"
+  "name": "ITS A DEAL v2",
+  "short_name": "ITS A DEAL",
+  "lang": "he-IL",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050713",
+  "theme_color": "#0d47a1",
+  "dir": "rtl",
+  "icons": []
 }
