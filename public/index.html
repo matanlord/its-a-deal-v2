@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <title>ITS A DEAL v2</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="manifest" href="manifest.json" />
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <div id="registerOverlay" class="overlay">
+    <div class="overlay-card">
+      <h2>ברוך הבא ל‑ITS A DEAL v2</h2>
+      <p>פעם ראשונה? תכתוב את השם שלך כדי להצטרף ללוח הדילים.</p>
+      <input type="text" id="registerName" placeholder="שם / כינוי" />
+      <button id="registerBtn" class="btn primary">הצטרף</button>
+      <p id="registerError" class="status-message error"></p>
+    </div>
+  </div>
+
+  <header class="app-header">
+    <h1>ITS A DEAL v2</h1>
+    <p class="subtitle">דילים בלייב לקבוצה סגורה</p>
+  </header>
+
+  <main class="app-main">
+    <section class="card">
+      <h2>משתמש נוכחי</h2>
+      <label for="currentUserSelect">בחר את השם שלך:</label>
+      <select id="currentUserSelect"></select>
+      <p class="info" id="currentUserInfo"></p>
+    </section>
+
+    <section class="card">
+      <h2>יצירת דיל חדש</h2>
+      <div class="form-row">
+        <label for="dealTargetSelect">למי אתה מציע?</label>
+        <select id="dealTargetSelect"></select>
+      </div>
+      <div class="form-row">
+        <label for="giveText">מה אתה נותן?</label>
+        <textarea id="giveText" placeholder="למשל: מחליף איתך משמרת שבת..."></textarea>
+      </div>
+      <div class="form-row">
+        <label for="takeText">מה אתה רוצה בחזרה?</label>
+        <textarea id="takeText" placeholder="למשל: אתה מחליף אותי בראשון בערב..."></textarea>
+      </div>
+      <button id="sendDealBtn" class="btn primary">שלח דיל</button>
+      <p id="createDealMessage" class="status-message"></p>
+    </section>
+
+    <section class="card">
+      <h2>דילים ממתינים אליי</h2>
+      <div id="inboxContainer" class="list-container"></div>
+    </section>
+
+    <section class="card">
+      <h2>לוח דילים ‑ מי חייב למי</h2>
+      <table class="score-table">
+        <thead>
+          <tr>
+            <th>שם</th>
+            <th>חייבים לו</th>
+            <th>הוא חייב</th>
+            <th>נטו</th>
+          </tr>
+        </thead>
+        <tbody id="scoreTableBody"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span>ITS A DEAL v2 – לייב בין כל המשתמשים</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
