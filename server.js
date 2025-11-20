@@ -1,8 +1,9 @@
-const ADMIN_PASSWORD = "812003"; 
 const express = require("express");
 const path = require("path");
 const http = require("http");
 const { Server } = require("socket.io");
+
+const ADMIN_PASSWORD = "CHANGE_ME_ADMIN_PASSWORD"; // TODO: change this before deploy
 
 const app = express();
 const server = http.createServer(app);
@@ -12,30 +13,11 @@ const io = new Server(server, {
 
 app.use(express.json());
 
-// משרת את קבצי הפרונט מהתיקייה public
+// serve frontend from /public
 const publicDir = path.join(__dirname, "public");
 app.use(express.static(publicDir));
 
-// ===== ADMIN LOGIN (simple password check) =====
-app.post("/api/admin/login", (req, res) => {
-  const { password } = req.body || {};
-  if (password === ADMIN_PASSWORD) {
-    return res.json({ ok: true });
-  }
-  return res.status(403).json({ ok: false, error: "wrong password" });
-});
-
-// החזרת מצב מלא רק לאדמין
-app.get("/api/admin/state", (req, res) => {
-  const pass = req.query.password;
-  if (pass !== ADMIN_PASSWORD) {
-    return res.status(403).json({ error: "forbidden" });
-  }
-  res.json(stateSnapshot());
-});
-
-
-// ===== מודל נתונים חדש =====
+// ===== data model =====
 // usersById: { [id]: { id, name, joinedAt, lastSeenAt } }
 // trades:   { id, fromId, toId, give, take, status, createdAt, decidedAt }
 const usersById = {};
@@ -62,7 +44,7 @@ function broadcastState() {
 
 // ===== REST API =====
 
-// יצירת / הצטרפות משתמש
+// create / login user by name (name -> fixed id, no impersonation)
 app.post("/api/join", (req, res) => {
   const rawName = (req.body && req.body.name) || "";
   const name = String(rawName).trim();
@@ -71,12 +53,14 @@ app.post("/api/join", (req, res) => {
     return res.status(400).json({ error: "name is required" });
   }
 
-  // אם השם כבר קיים — אסור
-  const exists = Object.values(usersById).find(u => u.name === name);
-  if (exists) {
-    return res.status(400).json({ error: "שם זה כבר בשימוש" });
+  // if user with this name already exists – return same user (login)
+  const existing = Object.values(usersById).find(u => u.name === name);
+  if (existing) {
+    existing.lastSeenAt = now();
+    return res.json(existing);
   }
 
+  // otherwise create new user with unique id for this name
   const id = makeId("u");
   const user = {
     id,
@@ -84,18 +68,18 @@ app.post("/api/join", (req, res) => {
     joinedAt: now(),
     lastSeenAt: now()
   };
-
   usersById[id] = user;
+
   broadcastState();
   res.json(user);
 });
 
-// מצב מלא ללקוח חדש
+// full state for initial boot
 app.get("/api/boot", (req, res) => {
   res.json(stateSnapshot());
 });
 
-// יצירת טרייד חדש
+// create trade
 app.post("/api/trades", (req, res) => {
   const { fromId, toId, give, take } = req.body || {};
 
@@ -125,7 +109,7 @@ app.post("/api/trades", (req, res) => {
   res.json(trade);
 });
 
-// שינוי סטטוס של טרייד
+// update trade status
 app.patch("/api/trades/:id", (req, res) => {
   const tradeId = req.params.id;
   const { action } = req.body || {};
@@ -154,6 +138,26 @@ app.patch("/api/trades/:id", (req, res) => {
 
   broadcastState();
   res.json(trade);
+});
+
+// ===== SIMPLE ADMIN API (password-based) =====
+
+// check admin password
+app.post("/api/admin/login", (req, res) => {
+  const { password } = req.body || {};
+  if (password === ADMIN_PASSWORD) {
+    return res.json({ ok: true });
+  }
+  return res.status(403).json({ ok: false, error: "wrong password" });
+});
+
+// get full state (users + trades) for admin
+app.get("/api/admin/state", (req, res) => {
+  const pass = req.query.password;
+  if (pass !== ADMIN_PASSWORD) {
+    return res.status(403).json({ error: "forbidden" });
+  }
+  res.json(stateSnapshot());
 });
 
 // ===== Socket.IO =====

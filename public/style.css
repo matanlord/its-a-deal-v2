@@ -56,7 +56,8 @@ label {
 
 select,
 textarea,
-input[type="text"] {
+input[type="text"],
+input[type="password"] {
   width: 100%;
   padding: 6px 8px;
   border-radius: 8px;
@@ -191,6 +192,9 @@ textarea {
   padding: 10px;
   color: #b0bec5;
   opacity: 0.8;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
 }
 
 .overlay {

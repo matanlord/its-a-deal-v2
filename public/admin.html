@@ -1,23 +1,29 @@
 <!DOCTYPE html>
-<html lang="he">
+<html lang="he" dir="rtl">
 <head>
   <meta charset="UTF-8">
-  <title>Admin Panel</title>
-  <link rel="stylesheet" href="/style.css">
+  <title>ITS A DEAL – Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css">
 </head>
-<body style="padding: 20px;">
+<body class="app-main">
   <h1>Admin Panel</h1>
 
-  <div id="loginBox">
+  <section class="card" id="loginBox">
+    <h2>כניסת אדמין</h2>
+    <p>הכנס סיסמת אדמין כדי לראות את כל המשתמשים והדילים.</p>
     <input id="adminPass" type="password" placeholder="סיסמת אדמין">
-    <button id="loginBtn">כניסה</button>
-    <p id="adminError" style="color:red"></p>
-  </div>
+    <button id="loginBtn" class="btn primary">כניסה</button>
+    <p id="adminError" class="status-message error"></p>
+  </section>
 
-  <div id="adminContent" style="display:none;">
-    <h2>כל המשתמשים</h2>
-    <pre id="usersList"></pre>
-  </div>
+  <section class="card" id="adminContent" style="display:none;">
+    <h2>מצב מערכת</h2>
+    <h3>משתמשים</h3>
+    <pre id="usersList" style="white-space:pre-wrap; font-size:12px;"></pre>
+    <h3>דילים</h3>
+    <pre id="tradesList" style="white-space:pre-wrap; font-size:12px;"></pre>
+  </section>
 
 <script>
   async function adminLogin() {
@@ -41,11 +47,13 @@
     document.getElementById("loginBox").style.display = "none";
     document.getElementById("adminContent").style.display = "block";
 
-    const res = await fetch("/api/admin/state?password=" + password);
+    const res = await fetch("/api/admin/state?password=" + encodeURIComponent(password));
     const data = await res.json();
 
     document.getElementById("usersList").textContent =
       JSON.stringify(data.users, null, 2);
+    document.getElementById("tradesList").textContent =
+      JSON.stringify(data.trades, null, 2);
   }
 
   document.getElementById("loginBtn").onclick = adminLogin;

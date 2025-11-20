@@ -1,4 +1,4 @@
-// ITS A DEAL v2 – לוגיקת פרונט חדשה
+// ITS A DEAL v2 – frontend logic (no user switching, id fixed per device)
 (() => {
   const STORAGE_KEY = "its_a_deal_v2_user_id";
 
@@ -13,8 +13,6 @@
     const registerBtn = document.getElementById("registerBtn");
     const registerError = document.getElementById("registerError");
 
-
-    const currentUserInfo = document.getElementById("currentUserInfo");
     const dealTargetSelect = document.getElementById("dealTargetSelect");
     const sendDealBtn = document.getElementById("sendDealBtn");
     const createDealMessage = document.getElementById("createDealMessage");
@@ -139,7 +137,7 @@
         renderScoreboard();
       });
 
-      // פינג לשרת כדי לעדכן lastSeenAt (לוגיקה שונה מהגרסה הישנה)
+      // ping server so lastSeenAt is updated
       setInterval(() => {
         if (socket && currentUserId) {
           socket.emit("pong:client-alive", currentUserId);
@@ -149,26 +147,16 @@
 
     function syncUsersSelects() {
       const dealTargetSelect = document.getElementById("dealTargetSelect");
-   
       dealTargetSelect.innerHTML = "";
 
       users.forEach((u) => {
-        const opt1 = document.createElement("option");
-        opt1.value = u.id;
-        opt1.textContent = u.name;
-
+        if (u.id === currentUserId) return; // don't show myself as target
         const opt2 = document.createElement("option");
         opt2.value = u.id;
         opt2.textContent = u.name;
         dealTargetSelect.appendChild(opt2);
       });
-
-      if (!users.find((u) => u.id === currentUserId) && users.length > 0) {
-        currentUserId = users[0].id;
-        localStorage.setItem(STORAGE_KEY, currentUserId);
-      }
-
-       }
+    }
 
     function getUserName(id) {
       const u = users.find((x) => x.id === id);
@@ -275,8 +263,8 @@
       users.forEach((u) => {
         counts[u.id] = {
           name: u.name,
-          credits: 0, // כמה חייבים לו
-          debts: 0 // כמה הוא חייב לאחרים
+          credits: 0, // owed to them
+          debts: 0 // they owe others
         };
       });
 
