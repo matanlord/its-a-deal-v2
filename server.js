@@ -31,7 +31,12 @@ function now() {
 }
 
 function makeId(prefix) {
-  return prefix + "_" + now().toString(36) + Math.random().toString(36).slice(2, 8);
+  return (
+    prefix +
+    "_" +
+    now().toString(36) +
+    Math.random().toString(36).slice(2, 8)
+  );
 }
 
 function safeUser(u) {
@@ -70,15 +75,19 @@ app.post("/api/join", (req, res) => {
     return res.status(400).json({ error: "צריך סיסמה" });
   }
   if (password.length < 6) {
-    return res.status(400).json({ error: "הסיסמה חייבת להיות לפחות 6 תווים" });
+    return res
+      .status(400)
+      .json({ error: "הסיסמה חייבת להיות לפחות 6 תווים" });
   }
 
-  const existing = Object.values(usersById).find(u => u.name === name);
+  const existing = Object.values(usersById).find((u) => u.name === name);
 
   if (existing) {
     // login case
     if (existing.password !== password) {
-      return res.status(400).json({ error: "השם הזה כבר קיים עם סיסמה אחרת" });
+      return res
+        .status(400)
+        .json({ error: "השם הזה כבר קיים עם סיסמה אחרת" });
     }
     existing.lastSeenAt = now();
     const out = safeUser(existing);
@@ -88,7 +97,9 @@ app.post("/api/join", (req, res) => {
 
   // new user – enforce "one created user per deviceId" if provided
   if (deviceId) {
-    const takenBy = Object.values(usersById).find(u => u.deviceId === deviceId);
+    const takenBy = Object.values(usersById).find(
+      (u) => u.deviceId === deviceId
+    );
     if (takenBy) {
       return res.status(400).json({
         error: "במכשיר הזה כבר נוצר משתמש בשם: " + takenBy.name
@@ -151,19 +162,38 @@ app.post("/api/trades", (req, res) => {
 // update trade status (accept / decline / cancel / break)
 app.patch("/api/trades/:id", (req, res) => {
   const tradeId = req.params.id;
-  const { action } = req.body || {};
+  const { action, requesterId } = req.body || {};
 
-  const trade = trades.find(t => t.id === tradeId);
+  const trade = trades.find((t) => t.id === tradeId);
   if (!trade) {
     return res.status(404).json({ error: "trade not found" });
-  }
-  if (trade.status !== "OPEN" && action !== "break") {
-    // only ACCEPTED trades can be broken, others can't change
-    return res.status(400).json({ error: "trade already decided" });
   }
 
   if (!["accept", "decline", "cancel", "break"].includes(action)) {
     return res.status(400).json({ error: "invalid action" });
+  }
+
+  // שבירת דיל – רק מי ששלח את ההצעה (fromId) יכול, ורק אם הדיל מאושר
+  if (action === "break") {
+    if (trade.status !== "ACCEPTED") {
+      return res
+        .status(400)
+        .json({ error: "only accepted trades can be broken" });
+    }
+    if (!requesterId || requesterId !== trade.fromId) {
+      return res.status(403).json({
+        error: "only the sender of the deal can break it"
+      });
+    }
+    trade.status = "BROKEN";
+    trade.decidedAt = now();
+    broadcastState();
+    return res.json(trade);
+  }
+
+  // שאר הפעולות (accept / decline / cancel) אפשר לשמור כמו קודם
+  if (trade.status !== "OPEN") {
+    return res.status(400).json({ error: "trade already decided" });
   }
 
   if (action === "accept") {
@@ -172,11 +202,6 @@ app.patch("/api/trades/:id", (req, res) => {
     trade.status = "DECLINED";
   } else if (action === "cancel") {
     trade.status = "CANCELLED";
-  } else if (action === "break") {
-    if (trade.status !== "ACCEPTED") {
-      return res.status(400).json({ error: "only accepted trades can be broken" });
-    }
-    trade.status = "BROKEN";
   }
 
   trade.decidedAt = now();
@@ -188,9 +213,16 @@ app.patch("/api/trades/:id", (req, res) => {
 // generate PDF contract for a trade
 app.get("/api/trades/:id/pdf", (req, res) => {
   const tradeId = req.params.id;
-  const trade = trades.find(t => t.id === tradeId);
+  const trade = trades.find((t) => t.id === tradeId);
   if (!trade) {
     return res.status(404).json({ error: "trade not found" });
+  }
+
+  // חוזה נוצר רק לאחר שהדיל מאושר
+  if (trade.status !== "ACCEPTED") {
+    return res
+      .status(400)
+      .json({ error: "PDF זמין רק לדילים מאושרים (ACCEPTED)" });
   }
 
   const fromUser = usersById[trade.fromId];
@@ -208,33 +240,62 @@ app.get("/api/trades/:id/pdf", (req, res) => {
   const doc = new PDFDocument({ margin: 50 });
   doc.pipe(res);
 
-  doc.fontSize(20).text("חוזה דיל - ITS A DEAL", { align: "center" });
+  // Title
+  doc.fontSize(20).text("חוזה דיל - ITS A DEAL", {
+    align: "center"
+  });
   doc.moveDown();
 
+  // Info
   doc.fontSize(12);
-  doc.text("תאריך יצירת הדיל: " + new Date(trade.createdAt).toLocaleString("he-IL"), {
+  const created = new Date(trade.createdAt).toLocaleString("he-IL");
+  doc.text("תאריך יצירת הדיל: " + created, {
     align: "right"
   });
   doc.moveDown();
 
-  doc.text("צד א': " + fromName, { align: "right" });
-  doc.text("צד ב': " + toName, { align: "right" });
+  doc.text("צד א' (שולח ההצעה): " + fromName, { align: "right" });
+  doc.text("צד ב' (מקבל ההצעה): " + toName, { align: "right" });
   doc.moveDown();
 
-  doc.text("מה צד א' נותן:", { align: "right", underline: true });
-  doc.text(trade.give, { align: "right" });
+  const bodyWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+  doc.text("מה צד א' מתחייב לתת:", {
+    align: "right",
+    underline: true,
+    width: bodyWidth
+  });
+  doc.moveDown(0.3);
+  doc.text(trade.give, {
+    align: "right",
+    width: bodyWidth
+  });
   doc.moveDown();
 
-  doc.text("מה צד ב' נותן:", { align: "right", underline: true });
-  doc.text(trade.take, { align: "right" });
+  doc.text("מה צד ב' מתחייב לתת:", {
+    align: "right",
+    underline: true,
+    width: bodyWidth
+  });
+  doc.moveDown(0.3);
+  doc.text(trade.take, {
+    align: "right",
+    width: bodyWidth
+  });
   doc.moveDown(2);
 
-  doc.text("סטטוס נוכחי של הדיל: " + trade.status, { align: "right" });
+  doc.text("סטטוס נוכחי של הדיל: " + trade.status, {
+    align: "right"
+  });
   doc.moveDown(2);
 
-  doc.text("חתימת צד א': ____________________", { align: "right" });
+  doc.text("חתימת צד א': ____________________", {
+    align: "right"
+  });
   doc.moveDown();
-  doc.text("חתימת צד ב': ____________________", { align: "right" });
+  doc.text("חתימת צד ב': ____________________", {
+    align: "right"
+  });
 
   doc.end();
 });
@@ -288,7 +349,7 @@ app.delete("/api/admin/trades/:id", (req, res) => {
     return res.status(403).json({ error: "forbidden" });
   }
   const id = req.params.id;
-  const idx = trades.findIndex(t => t.id === id);
+  const idx = trades.findIndex((t) => t.id === id);
   if (idx === -1) {
     return res.status(404).json({ error: "trade not found" });
   }
@@ -315,5 +376,5 @@ io.on("connection", (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("ITS A DEAL v7 listening on http://localhost:" + PORT);
+  console.log("ITS A DEAL v8 listening on http://localhost:" + PORT);
 });

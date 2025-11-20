@@ -1,14 +1,14 @@
-// ITS A DEAL v7 – frontend logic
+// ITS A DEAL v8 – frontend logic
 // - no user switching
 // - per-user password
 // - one account per device (client + server enforcement)
 // - deviceId sent to server so admin can see which user שייך לאיזה מכשיר
-// - PDF contract per deal
-// - break deal option for accepted deals
+// - PDF contract per deal AFTER ACCEPTED
+// - break deal option only for the sender (fromId) on accepted deals
 (() => {
-  const DEVICE_LOCK_KEY = "its_a_deal_v7_device_locked";
-  const DEVICE_NAME_KEY = "its_a_deal_v7_device_name";
-  const DEVICE_ID_KEY = "its_a_deal_v7_device_id";
+  const DEVICE_LOCK_KEY = "its_a_deal_v8_device_locked";
+  const DEVICE_NAME_KEY = "its_a_deal_v8_device_name";
+  const DEVICE_ID_KEY = "its_a_deal_v8_device_id";
 
   let socket = null;
   let currentUserId = null;
@@ -155,7 +155,7 @@
         }
         document.getElementById("giveText").value = "";
         document.getElementById("takeText").value = "";
-        createDealMessage.textContent = "הדיל נשלח ✅ (נוצר חוזה PDF לשני הצדדים)";
+        createDealMessage.textContent = "הדיל נשלח ✅ (החוזה יהיה זמין כ-PDF אחרי שהדיל יאושר)";
         createDealMessage.classList.add("ok");
       } catch (err) {
         console.error(err);
@@ -299,11 +299,7 @@
           const actions = document.createElement("div");
           actions.className = "deal-actions";
 
-          const btnPdf = document.createElement("button");
-          btnPdf.className = "btn small";
-          btnPdf.textContent = "📄 חוזה PDF";
-          btnPdf.addEventListener("click", () => openPdf(t.id));
-
+          // שים לב: כאן אין PDF – רק אחרי שהדיל מאושר
           const btnAccept = document.createElement("button");
           btnAccept.className = "btn small accept";
           btnAccept.textContent = "קבל ✅";
@@ -318,7 +314,6 @@
             updateTrade(t.id, "decline");
           });
 
-          actions.appendChild(btnPdf);
           actions.appendChild(btnAccept);
           actions.appendChild(btnReject);
 
@@ -387,18 +382,20 @@
           btnPdf.className = "btn small";
           btnPdf.textContent = "📄 חוזה PDF";
           btnPdf.addEventListener("click", () => openPdf(t.id));
-
-          const btnBreak = document.createElement("button");
-          btnBreak.className = "btn small reject";
-          btnBreak.textContent = "שבירת דיל";
-          btnBreak.addEventListener("click", () => {
-            if (confirm("אתה בטוח שהדיל נשבר ביניכם?")) {
-              updateTrade(t.id, "break");
-            }
-          });
-
           actions.appendChild(btnPdf);
-          actions.appendChild(btnBreak);
+
+          // שבירת דיל – רק למי ששלח את ההצעה
+          if (currentUserId === t.fromId) {
+            const btnBreak = document.createElement("button");
+            btnBreak.className = "btn small reject";
+            btnBreak.textContent = "שבירת דיל";
+            btnBreak.addEventListener("click", () => {
+              if (confirm("אתה בטוח שהדיל נשבר ביניכם?")) {
+                updateTrade(t.id, "break");
+              }
+            });
+            actions.appendChild(btnBreak);
+          }
 
           item.appendChild(header);
           item.appendChild(body);
@@ -410,10 +407,14 @@
 
     async function updateTrade(tradeId, action) {
       try {
+        const body = { action };
+        if (action === "break") {
+          body.requesterId = currentUserId;
+        }
         const res = await fetch("/api/trades/" + tradeId, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action })
+          body: JSON.stringify(body)
         });
         if (!res.ok) {
           console.error("update trade failed");
