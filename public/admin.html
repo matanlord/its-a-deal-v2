@@ -1,1 +1,54 @@
-<html><body><h1>Admin</h1></body></html>
+<!DOCTYPE html>
+<html lang="he">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Panel</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body style="padding: 20px;">
+  <h1>Admin Panel</h1>
+
+  <div id="loginBox">
+    <input id="adminPass" type="password" placeholder="סיסמת אדמין">
+    <button id="loginBtn">כניסה</button>
+    <p id="adminError" style="color:red"></p>
+  </div>
+
+  <div id="adminContent" style="display:none;">
+    <h2>כל המשתמשים</h2>
+    <pre id="usersList"></pre>
+  </div>
+
+<script>
+  async function adminLogin() {
+    const password = document.getElementById("adminPass").value;
+    const res = await fetch("/api/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password })
+    });
+
+    const data = await res.json();
+    if (!data.ok) {
+      document.getElementById("adminError").textContent = "סיסמה שגויה";
+      return;
+    }
+
+    loadAdminData(password);
+  }
+
+  async function loadAdminData(password) {
+    document.getElementById("loginBox").style.display = "none";
+    document.getElementById("adminContent").style.display = "block";
+
+    const res = await fetch("/api/admin/state?password=" + password);
+    const data = await res.json();
+
+    document.getElementById("usersList").textContent =
+      JSON.stringify(data.users, null, 2);
+  }
+
+  document.getElementById("loginBtn").onclick = adminLogin;
+</script>
+</body>
+</html>

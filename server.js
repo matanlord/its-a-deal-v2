@@ -1,3 +1,4 @@
+const ADMIN_PASSWORD = "812003"; 
 const express = require("express");
 const path = require("path");
 const http = require("http");
@@ -14,6 +15,25 @@ app.use(express.json());
 // משרת את קבצי הפרונט מהתיקייה public
 const publicDir = path.join(__dirname, "public");
 app.use(express.static(publicDir));
+
+// ===== ADMIN LOGIN (simple password check) =====
+app.post("/api/admin/login", (req, res) => {
+  const { password } = req.body || {};
+  if (password === ADMIN_PASSWORD) {
+    return res.json({ ok: true });
+  }
+  return res.status(403).json({ ok: false, error: "wrong password" });
+});
+
+// החזרת מצב מלא רק לאדמין
+app.get("/api/admin/state", (req, res) => {
+  const pass = req.query.password;
+  if (pass !== ADMIN_PASSWORD) {
+    return res.status(403).json({ error: "forbidden" });
+  }
+  res.json(stateSnapshot());
+});
+
 
 // ===== מודל נתונים חדש =====
 // usersById: { [id]: { id, name, joinedAt, lastSeenAt } }
@@ -51,7 +71,12 @@ app.post("/api/join", (req, res) => {
     return res.status(400).json({ error: "name is required" });
   }
 
-  // אנחנו לא ממחזרים משתמשים – תמיד יוצר חדש (לוגיקה פשוטה ושונה מהגרסה הקודמת)
+  // אם השם כבר קיים — אסור
+  const exists = Object.values(usersById).find(u => u.name === name);
+  if (exists) {
+    return res.status(400).json({ error: "שם זה כבר בשימוש" });
+  }
+
   const id = makeId("u");
   const user = {
     id,
@@ -59,8 +84,8 @@ app.post("/api/join", (req, res) => {
     joinedAt: now(),
     lastSeenAt: now()
   };
-  usersById[id] = user;
 
+  usersById[id] = user;
   broadcastState();
   res.json(user);
 });

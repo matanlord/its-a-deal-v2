@@ -13,7 +13,7 @@
     const registerBtn = document.getElementById("registerBtn");
     const registerError = document.getElementById("registerError");
 
-    const currentUserSelect = document.getElementById("currentUserSelect");
+
     const currentUserInfo = document.getElementById("currentUserInfo");
     const dealTargetSelect = document.getElementById("dealTargetSelect");
     const sendDealBtn = document.getElementById("sendDealBtn");
@@ -55,16 +55,6 @@
         console.error(err);
         registerError.textContent = "שגיאת רשת";
       }
-    });
-
-    currentUserSelect.addEventListener("change", () => {
-      currentUserId = currentUserSelect.value || null;
-      if (currentUserId) {
-        localStorage.setItem(STORAGE_KEY, currentUserId);
-      }
-      renderCurrentUserInfo();
-      renderInbox();
-      renderScoreboard();
     });
 
     sendDealBtn.addEventListener("click", async () => {
@@ -158,16 +148,14 @@
     }
 
     function syncUsersSelects() {
-      const currentUserSelect = document.getElementById("currentUserSelect");
       const dealTargetSelect = document.getElementById("dealTargetSelect");
-      currentUserSelect.innerHTML = "";
+   
       dealTargetSelect.innerHTML = "";
 
       users.forEach((u) => {
         const opt1 = document.createElement("option");
         opt1.value = u.id;
         opt1.textContent = u.name;
-        currentUserSelect.appendChild(opt1);
 
         const opt2 = document.createElement("option");
         opt2.value = u.id;
@@ -180,10 +168,7 @@
         localStorage.setItem(STORAGE_KEY, currentUserId);
       }
 
-      if (currentUserId) {
-        currentUserSelect.value = currentUserId;
-      }
-    }
+       }
 
     function getUserName(id) {
       const u = users.find((x) => x.id === id);
