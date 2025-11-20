@@ -238,6 +238,13 @@ app.get("/api/trades/:id/pdf", (req, res) => {
   );
 
   const doc = new PDFDocument({ margin: 50 });
+  try {
+    const fontPath = path.join(__dirname, "fonts", "DejaVuSans.ttf");
+    doc.registerFont("Hebrew", fontPath);
+    doc.font("Hebrew");
+  } catch (e) {
+    console.error("Font load error", e);
+  }
   doc.pipe(res);
 
   // Title
@@ -376,5 +383,5 @@ io.on("connection", (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("ITS A DEAL v8 listening on http://localhost:" + PORT);
+  console.log("ITS A DEAL v9 listening on http://localhost:" + PORT);
 });

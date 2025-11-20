@@ -1,6 +1,6 @@
 {
-  "name": "its-a-deal-v8",
-  "version": "1.8.0",
+  "name": "its-a-deal-v9",
+  "version": "1.9.0",
   "description": "Realtime group deals board for a closed group (admin panel, per-user password, device one-time create, PDF contracts after ACCEPTED, break only by sender, delete & online, names in admin)",
   "main": "server.js",
   "scripts": {
