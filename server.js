@@ -180,7 +180,7 @@ app.patch("/api/trades/:id", (req, res) => {
     return res.status(404).json({ error: "trade not found" });
   }
 
-  if (!["accept", "decline", "cancel", "break"].includes(action)) {
+  if (!["accept", "decline", "cancel", "break", "done"].includes(action)) {
     return res.status(400).json({ error: "invalid action" });
   }
 
@@ -197,6 +197,23 @@ app.patch("/api/trades/:id", (req, res) => {
       });
     }
     trade.status = "BROKEN";
+    trade.decidedAt = now();
+    broadcastState();
+    return res.json(trade);
+  }
+
+  if (action === "done") {
+    if (trade.status !== "ACCEPTED") {
+      return res
+        .status(400)
+        .json({ error: "only accepted trades can be marked as done" });
+    }
+    if (!requesterId || requesterId !== trade.fromId) {
+      return res.status(403).json({
+        error: "only the sender of the deal can mark it as done"
+      });
+    }
+    trade.status = "DONE";
     trade.decidedAt = now();
     broadcastState();
     return res.json(trade);
@@ -258,33 +275,59 @@ app.get("/api/trades/:id/pdf", (req, res) => {
   }
   doc.pipe(res);
 
-  // Title
-  doc.fontSize(20).text("חוזה דיל - ITS A DEAL", {
-    align: "center"
+  const pageWidth = doc.page.width;
+  const marginLeft = doc.page.margins.left;
+  const marginRight = doc.page.margins.right;
+  const bodyWidth = pageWidth - marginLeft - marginRight;
+
+  // Header bar
+  doc.save();
+  doc.rect(0, 0, pageWidth, 60).fill("#0d47a1");
+  doc.fillColor("#ffffff");
+  doc.fontSize(20).text("חוזה דיל - ITS A DEAL", marginLeft, 18, {
+    align: "center",
+    width: bodyWidth
   });
+  doc.restore();
+
+  doc.moveDown(3);
+
+  // Info box background
+  const infoTop = doc.y;
+  const boxPadding = 8;
+  const boxWidth = bodyWidth;
+  // Draw a light background box
+  doc.save();
+  doc.rect(marginLeft, infoTop - boxPadding, boxWidth, 80).fill("#f5f5f5");
+  doc.restore();
+
+  doc.fillColor("#000000").fontSize(12);
+  doc.text("תאריך יצירת הדיל: " + new Date(trade.createdAt).toLocaleString("he-IL"), marginLeft + 6, infoTop, {
+    align: "right",
+    width: boxWidth - 12
+  });
+  doc.moveDown(0.5);
+  doc.text("צד א' (המציע): " + fromName, {
+    align: "right",
+    width: boxWidth - 12
+  });
+  doc.moveDown(0.3);
+  doc.text("צד ב' (המאשר): " + toName, {
+    align: "right",
+    width: boxWidth - 12
+  });
+
   doc.moveDown(2);
 
-  // Info
-  doc.fontSize(12);
-  const created = new Date(trade.createdAt).toLocaleString("he-IL");
-  doc.text("תאריך יצירת הדיל: " + created, {
-    align: "right"
-  });
-  doc.moveDown(1);
-
-  doc.text("צד א' (המציע): " + fromName, { align: "right" });
-  doc.text("צד ב' (המאשר): " + toName, { align: "right" });
-  doc.moveDown(2);
-
-  const bodyWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-
-  doc.text("פרטי ההתחייבות:", {
+  // Deal details section
+  doc.fontSize(13).text("פרטי ההתחייבות", {
     align: "right",
     underline: true,
     width: bodyWidth
   });
   doc.moveDown(1);
 
+  doc.fontSize(12);
   doc.text("• מה צד א' מתחייב לתת:", {
     align: "right",
     width: bodyWidth
@@ -308,16 +351,8 @@ app.get("/api/trades/:id/pdf", (req, res) => {
   doc.moveDown(2);
 
   doc.text("סטטוס נוכחי של הדיל: " + trade.status, {
-    align: "right"
-  });
-  doc.moveDown(3);
-
-  doc.text("חתימת צד א': ____________________", {
-    align: "right"
-  });
-  doc.moveDown(1);
-  doc.text("חתימת צד ב': ____________________", {
-    align: "right"
+    align: "right",
+    width: bodyWidth
   });
 
   doc.end();
@@ -399,5 +434,5 @@ io.on("connection", (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("ITS A DEAL v10 listening on http://localhost:" + PORT);
+  console.log("ITS A DEAL v11 listening on http://localhost:" + PORT);
 });

@@ -6,9 +6,9 @@
 // - PDF contract per deal AFTER ACCEPTED
 // - break deal option only for the sender (fromId) on accepted deals
 (() => {
-  const DEVICE_LOCK_KEY = "its_a_deal_v10_device_locked";
-  const DEVICE_NAME_KEY = "its_a_deal_v10_device_name";
-  const DEVICE_ID_KEY = "its_a_deal_v10_device_id";
+  const DEVICE_LOCK_KEY = "its_a_deal_v11_device_locked";
+  const DEVICE_NAME_KEY = "its_a_deal_v11_device_name";
+  const DEVICE_ID_KEY = "its_a_deal_v11_device_id";
 
   let socket = null;
   let currentUserId = null;
@@ -428,8 +428,18 @@
           btnPdf.addEventListener("click", () => openPdf(t.id));
           actions.appendChild(btnPdf);
 
-          // שבירת דיל – רק למי ששלח את ההצעה
+          // פעולות צד א' בלבד
           if (currentUserId === t.fromId) {
+            const btnDone = document.createElement("button");
+            btnDone.className = "btn small accept";
+            btnDone.textContent = "הדיל בוצע";
+            btnDone.addEventListener("click", () => {
+              if (confirm("האם הדיל בוצע במלואו ואינך חייב יותר?")) {
+                updateTrade(t.id, "done");
+              }
+            });
+            actions.appendChild(btnDone);
+
             const btnBreak = document.createElement("button");
             btnBreak.className = "btn small reject";
             btnBreak.textContent = "שבירת דיל";
@@ -452,7 +462,7 @@
     async function updateTrade(tradeId, action) {
       try {
         const body = { action };
-        if (action === "break") {
+        if (action === "break" || action === "done") {
           body.requesterId = currentUserId;
         }
         const res = await fetch("/api/trades/" + tradeId, {
@@ -502,8 +512,12 @@
         return b.net - a.net;
       });
 
-      arr.forEach((row) => {
+      arr.forEach((row, index) => {
         const tr = document.createElement("tr");
+
+        const tdTitle = document.createElement("td");
+        tdTitle.textContent = index === 0 && row.credits > 0 ? "OVERLORD" : "";
+        tr.appendChild(tdTitle);
 
         const tdName = document.createElement("td");
         tdName.textContent = row.name;
