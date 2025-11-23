@@ -1,7 +1,7 @@
 {
   "name": "its-a-deal-v11",
-  "version": "1.11.0",
-  "description": "Realtime group deals board for a closed group (admin panel, per-user password, device one-time create, PDF contracts after ACCEPTED, break only by sender, delete & online, names in admin)",
+  "version": "1.12.0",
+  "description": "ITS A DEAL \u2013 Firebase-backed persistence for users & trades.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -19,7 +19,8 @@
   "dependencies": {
     "express": "^5.1.0",
     "socket.io": "^4.8.1",
-    "pdfkit": "^0.15.0"
+    "pdfkit": "^0.15.0",
+    "firebase-admin": "^13.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"

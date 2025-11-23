@@ -1,11 +1,37 @@
+
 const express = require("express");
 const path = require("path");
-const fs = require("fs");
 const http = require("http");
 const { Server } = require("socket.io");
 const PDFDocument = require("pdfkit");
+const admin = require("firebase-admin");
 
 const ADMIN_PASSWORD = "CHANGE_ME_ADMIN_PASSWORD"; // TODO: change this before deploy
+
+// ===== Firebase init =====
+let appOptions = undefined;
+if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+  try {
+    const svc = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    appOptions = { credential: admin.credential.cert(svc) };
+  } catch (e) {
+    console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", e);
+  }
+}
+
+try {
+  if (appOptions) {
+    admin.initializeApp(appOptions);
+  } else {
+    // ינסה להשתמש ב־Application Default Credentials אם קיימים
+    admin.initializeApp();
+  }
+} catch (e) {
+  console.error("Firebase init error:", e);
+  process.exit(1);
+}
+
+const db = admin.firestore();
 
 const app = express();
 const server = http.createServer(app);
@@ -19,8 +45,7 @@ app.use(express.json());
 const publicDir = path.join(__dirname, "public");
 app.use(express.static(publicDir));
 
-// ===== persistence (disk) =====
-const DATA_FILE = path.join(__dirname, "data.json");
+// ===== in-memory state (sync עם Firebase) =====
 
 // usersById: {
 //   [id]: { id, name, password, joinedAt, lastSeenAt, deviceId }
@@ -29,96 +54,59 @@ const DATA_FILE = path.join(__dirname, "data.json");
 const usersById = {};
 const trades = [];
 
-// load state from disk on startup
-function loadStateFromDisk() {
-  try {
-    if (!fs.existsSync(DATA_FILE)) {
-      console.log("No existing data.json, starting with empty state");
-      return;
-    }
-    const raw = fs.readFileSync(DATA_FILE, "utf8");
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-
-    // clear current in-memory state
-    for (const k of Object.keys(usersById)) {
-      delete usersById[k];
-    }
-    trades.splice(0, trades.length);
-
-    if (parsed && parsed.usersById && typeof parsed.usersById === "object") {
-      for (const [id, user] of Object.entries(parsed.usersById)) {
-        usersById[id] = user;
-      }
-    }
-    if (parsed && Array.isArray(parsed.trades)) {
-      parsed.trades.forEach((t) => trades.push(t));
-    }
-
-    console.log(
-      "Loaded state from data.json:",
-      Object.keys(usersById).length,
-      "users,",
-      trades.length,
-      "trades"
-    );
-  } catch (e) {
-    console.error("Failed to load state from disk:", e);
+// ----- helpers for Firebase -----
+async function loadStateFromFirebase() {
+  console.log("Loading state from Firebase...");
+  // clear current state
+  for (const k of Object.keys(usersById)) {
+    delete usersById[k];
   }
-}
+  trades.splice(0, trades.length);
 
-let saveTimer = null;
-
-// async save (debounced) – כדי לא לכתוב לדיסק אלף פעם בשנייה
-function scheduleSaveToDisk() {
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    saveStateToDisk();
-  }, 500);
-}
-
-function saveStateToDisk() {
-  const payload = {
-    usersById,
-    trades
-  };
-  const json = JSON.stringify(payload, null, 2);
-  const tmpFile = DATA_FILE + ".tmp";
-  fs.writeFile(tmpFile, json, "utf8", (err) => {
-    if (err) {
-      console.error("Failed to write state tmp file:", err);
-      return;
+  const usersSnap = await db.collection("users").get();
+  usersSnap.forEach((doc) => {
+    const data = doc.data();
+    if (data && data.id) {
+      usersById[data.id] = data;
+    } else {
+      // אם אין שדה id בגוף, נשתמש ב-id של המסמך
+      const u = { ...data, id: doc.id };
+      usersById[u.id] = u;
     }
-    fs.rename(tmpFile, DATA_FILE, (err2) => {
-      if (err2) {
-        console.error("Failed to move tmp -> data.json:", err2);
-      } else {
-        // console.log("State saved to", DATA_FILE);
-      }
-    });
   });
+
+  const tradesSnap = await db.collection("trades").get();
+  tradesSnap.forEach((doc) => {
+    const data = doc.data();
+    if (data && data.id) {
+      trades.push(data);
+    }
+  });
+
+  console.log(
+    "Loaded from Firebase:",
+    Object.keys(usersById).length,
+    "users,",
+    trades.length,
+    "trades"
+  );
 }
 
-// sync save on process exit – למקרה של כיבוי מסודר
-function saveStateSyncOnExit() {
-  try {
-    const payload = { usersById, trades };
-    fs.writeFileSync(DATA_FILE, JSON.stringify(payload, null, 2), "utf8");
-    console.log("State saved sync on shutdown");
-  } catch (e) {
-    console.error("Failed to save state sync on shutdown:", e);
-  }
+async function saveUserToDB(user) {
+  await db.collection("users").doc(user.id).set(user, { merge: true });
 }
 
-process.on("SIGINT", () => {
-  saveStateSyncOnExit();
-  process.exit(0);
-});
-process.on("SIGTERM", () => {
-  saveStateSyncOnExit();
-  process.exit(0);
-});
+async function deleteUserFromDB(id) {
+  await db.collection("users").doc(id).delete();
+}
+
+async function saveTradeToDB(trade) {
+  await db.collection("trades").doc(trade.id).set(trade, { merge: true });
+}
+
+async function deleteTradeFromDB(id) {
+  await db.collection("trades").doc(id).delete();
+}
 
 // ===== helpers =====
 
@@ -150,76 +138,81 @@ function stateSnapshot() {
 
 function broadcastState() {
   io.emit("state:update", stateSnapshot());
-  scheduleSaveToDisk(); // כל שינוי גלובלי נשמר גם לדיסק
 }
 
 // ===== REST API =====
 
 // create / login user – name+password pair
 // adds isNew: true/false so client knows if this device just created first user
-app.post("/api/join", (req, res) => {
-  const rawName = (req.body && req.body.name) || "";
-  const rawPassword = (req.body && req.body.password) || "";
-  const rawDeviceId = (req.body && req.body.deviceId) || "";
-  const name = String(rawName).trim();
-  const password = String(rawPassword);
-  const deviceId = rawDeviceId ? String(rawDeviceId) : null;
+app.post("/api/join", async (req, res) => {
+  try {
+    const rawName = (req.body && req.body.name) || "";
+    const rawPassword = (req.body && req.body.password) || "";
+    const rawDeviceId = (req.body && req.body.deviceId) || "";
+    const name = String(rawName).trim();
+    const password = String(rawPassword);
+    const deviceId = rawDeviceId ? String(rawDeviceId) : null;
 
-  if (!name) {
-    return res.status(400).json({ error: "צריך לכתוב שם" });
-  }
-  if (!password) {
-    return res.status(400).json({ error: "צריך סיסמה" });
-  }
-  if (password.length < 6) {
-    return res
-      .status(400)
-      .json({ error: "הסיסמה חייבת להיות לפחות 6 תווים" });
-  }
-
-  const existing = Object.values(usersById).find((u) => u.name === name);
-
-  if (existing) {
-    // login case
-    if (existing.password !== password) {
+    if (!name) {
+      return res.status(400).json({ error: "צריך לכתוב שם" });
+    }
+    if (!password) {
+      return res.status(400).json({ error: "צריך סיסמה" });
+    }
+    if (password.length < 6) {
       return res
         .status(400)
-        .json({ error: "השם הזה כבר קיים עם סיסמה אחרת" });
+        .json({ error: "הסיסמה חייבת להיות לפחות 6 תווים" });
     }
-    existing.lastSeenAt = now();
-    scheduleSaveToDisk(); // נשמור גם את ה-lastSeenAt שנכנס מהלוגין
-    const out = safeUser(existing);
-    out.isNew = false;
-    return res.json(out);
-  }
 
-  // new user – enforce "one created user per deviceId" if provided
-  if (deviceId) {
-    const takenBy = Object.values(usersById).find(
-      (u) => u.deviceId === deviceId
-    );
-    if (takenBy) {
-      return res.status(400).json({
-        error: "במכשיר הזה כבר נוצר משתמש בשם: " + takenBy.name
-      });
+    const existing = Object.values(usersById).find((u) => u.name === name);
+
+    if (existing) {
+      // login case
+      if (existing.password !== password) {
+        return res
+          .status(400)
+          .json({ error: "השם הזה כבר קיים עם סיסמה אחרת" });
+      }
+      existing.lastSeenAt = now();
+      await saveUserToDB(existing);
+      const out = safeUser(existing);
+      out.isNew = false;
+      return res.json(out);
     }
+
+    // new user – enforce "one created user per deviceId" if provided
+    if (deviceId) {
+      const takenBy = Object.values(usersById).find(
+        (u) => u.deviceId === deviceId
+      );
+      if (takenBy) {
+        return res.status(400).json({
+          error: "במכשיר הזה כבר נוצר משתמש בשם: " + takenBy.name
+        });
+      }
+    }
+
+    const id = makeId("u");
+    const user = {
+      id,
+      name,
+      password,
+      joinedAt: now(),
+      lastSeenAt: now(),
+      deviceId: deviceId || null
+    };
+    usersById[id] = user;
+
+    await saveUserToDB(user);
+    broadcastState();
+    const out = safeUser(user);
+    out.isNew = true;
+    res.json(out);
+  } catch (e) {
+    console.error("join error:", e);
+    res.status(500).json({ error: "server error" });
   }
-
-  const id = makeId("u");
-  const user = {
-    id,
-    name,
-    password,
-    joinedAt: now(),
-    lastSeenAt: now(),
-    deviceId: deviceId || null
-  };
-  usersById[id] = user;
-
-  broadcastState(); // כולל scheduleSaveToDisk
-  const out = safeUser(user);
-  out.isNew = true;
-  res.json(out);
 });
 
 // device status by deviceId – used by client to reset wrong first user after admin delete
@@ -238,101 +231,115 @@ app.get("/api/boot", (req, res) => {
 });
 
 // create trade
-app.post("/api/trades", (req, res) => {
-  const { fromId, toId, give, take } = req.body || {};
+app.post("/api/trades", async (req, res) => {
+  try {
+    const { fromId, toId, give, take } = req.body || {};
 
-  if (!fromId || !toId || !give || !take) {
-    return res.status(400).json({ error: "missing fields" });
-  }
-  if (!usersById[fromId] || !usersById[toId]) {
-    return res.status(400).json({ error: "unknown users" });
-  }
-  if (fromId === toId) {
-    return res.status(400).json({ error: "cannot trade with yourself" });
-  }
+    if (!fromId || !toId || !give || !take) {
+      return res.status(400).json({ error: "missing fields" });
+    }
+    if (!usersById[fromId] || !usersById[toId]) {
+      return res.status(400).json({ error: "unknown users" });
+    }
+    if (fromId === toId) {
+      return res.status(400).json({ error: "cannot trade with yourself" });
+    }
 
-  const trade = {
-    id: makeId("t"),
-    fromId,
-    toId,
-    give: String(give).trim(),
-    take: String(take).trim(),
-    status: "OPEN", // OPEN | ACCEPTED | DECLINED | CANCELLED | BROKEN | DONE
-    createdAt: now(),
-    decidedAt: null
-  };
+    const trade = {
+      id: makeId("t"),
+      fromId,
+      toId,
+      give: String(give).trim(),
+      take: String(take).trim(),
+      status: "OPEN", // OPEN | ACCEPTED | DECLINED | CANCELLED | BROKEN | DONE
+      createdAt: now(),
+      decidedAt: null
+    };
 
-  trades.push(trade);
-  broadcastState(); // + save
-  res.json(trade);
+    trades.push(trade);
+    await saveTradeToDB(trade);
+    broadcastState();
+    res.json(trade);
+  } catch (e) {
+    console.error("create trade error:", e);
+    res.status(500).json({ error: "server error" });
+  }
 });
 
 // update trade status (accept / decline / cancel / break / done)
-app.patch("/api/trades/:id", (req, res) => {
-  const tradeId = req.params.id;
-  const { action, requesterId } = req.body || {};
+app.patch("/api/trades/:id", async (req, res) => {
+  try {
+    const tradeId = req.params.id;
+    const { action, requesterId } = req.body || {};
 
-  const trade = trades.find((t) => t.id === tradeId);
-  if (!trade) {
-    return res.status(404).json({ error: "trade not found" });
-  }
-
-  if (!["accept", "decline", "cancel", "break", "done"].includes(action)) {
-    return res.status(400).json({ error: "invalid action" });
-  }
-
-  // שבירת דיל – רק מי ששלח את ההצעה (fromId) יכול, ורק אם הדיל מאושר
-  if (action === "break") {
-    if (trade.status !== "ACCEPTED") {
-      return res
-        .status(400)
-        .json({ error: "only accepted trades can be broken" });
+    const trade = trades.find((t) => t.id === tradeId);
+    if (!trade) {
+      return res.status(404).json({ error: "trade not found" });
     }
-    if (!requesterId || requesterId !== trade.fromId) {
-      return res.status(403).json({
-        error: "only the sender of the deal can break it"
-      });
+
+    if (!["accept", "decline", "cancel", "break", "done"].includes(action)) {
+      return res.status(400).json({ error: "invalid action" });
     }
-    trade.status = "BROKEN";
+
+    // שבירת דיל – רק מי ששלח את ההצעה (fromId) יכול, ורק אם הדיל מאושר
+    if (action === "break") {
+      if (trade.status !== "ACCEPTED") {
+        return res
+          .status(400)
+          .json({ error: "only accepted trades can be broken" });
+      }
+      if (!requesterId || requesterId !== trade.fromId) {
+        return res.status(403).json({
+          error: "only the sender of the deal can break it"
+        });
+      }
+      trade.status = "BROKEN";
+      trade.decidedAt = now();
+      await saveTradeToDB(trade);
+      broadcastState();
+      return res.json(trade);
+    }
+
+    if (action === "done") {
+      if (trade.status !== "ACCEPTED") {
+        return res
+          .status(400)
+          .json({ error: "only accepted trades can be marked as done" });
+      }
+      if (!requesterId || requesterId !== trade.fromId) {
+        return res.status(403).json({
+          error: "only the sender of the deal can mark it as done"
+        });
+      }
+      trade.status = "DONE";
+      trade.decidedAt = now();
+      await saveTradeToDB(trade);
+      broadcastState();
+      return res.json(trade);
+    }
+
+    // שאר הפעולות (accept / decline / cancel) אפשר לשמור כמו קודם
+    if (trade.status !== "OPEN") {
+      return res.status(400).json({ error: "trade already decided" });
+    }
+
+    if (action === "accept") {
+      trade.status = "ACCEPTED";
+    } else if (action === "decline") {
+      trade.status = "DECLINED";
+    } else if (action === "cancel") {
+      trade.status = "CANCELLED";
+    }
+
     trade.decidedAt = now();
+
+    await saveTradeToDB(trade);
     broadcastState();
-    return res.json(trade);
+    res.json(trade);
+  } catch (e) {
+    console.error("update trade error:", e);
+    res.status(500).json({ error: "server error" });
   }
-
-  if (action === "done") {
-    if (trade.status !== "ACCEPTED") {
-      return res
-        .status(400)
-        .json({ error: "only accepted trades can be marked as done" });
-    }
-    if (!requesterId || requesterId !== trade.fromId) {
-      return res.status(403).json({
-        error: "only the sender of the deal can mark it as done"
-      });
-    }
-    trade.status = "DONE";
-    trade.decidedAt = now();
-    broadcastState();
-    return res.json(trade);
-  }
-
-  // שאר הפעולות (accept / decline / cancel) אפשר לשמור כמו קודם
-  if (trade.status !== "OPEN") {
-    return res.status(400).json({ error: "trade already decided" });
-  }
-
-  if (action === "accept") {
-    trade.status = "ACCEPTED";
-  } else if (action === "decline") {
-    trade.status = "DECLINED";
-  } else if (action === "cancel") {
-    trade.status = "CANCELLED";
-  }
-
-  trade.decidedAt = now();
-
-  broadcastState();
-  res.json(trade);
 });
 
 // generate PDF contract for a trade
@@ -482,66 +489,90 @@ app.get("/api/admin/state", (req, res) => {
 });
 
 // delete user (and all their trades)
-app.delete("/api/admin/users/:id", (req, res) => {
-  const pass = req.query.password;
-  if (pass !== ADMIN_PASSWORD) {
-    return res.status(403).json({ error: "forbidden" });
-  }
-  const id = req.params.id;
-  if (!usersById[id]) {
-    return res.status(404).json({ error: "user not found" });
-  }
-  delete usersById[id];
-
-  for (let i = trades.length - 1; i >= 0; i--) {
-    if (trades[i].fromId === id || trades[i].toId === id) {
-      trades.splice(i, 1);
+app.delete("/api/admin/users/:id", async (req, res) => {
+  try {
+    const pass = req.query.password;
+    if (pass !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: "forbidden" });
     }
+    const id = req.params.id;
+    if (!usersById[id]) {
+      return res.status(404).json({ error: "user not found" });
+    }
+    delete usersById[id];
+
+    // delete user in DB
+    await deleteUserFromDB(id);
+
+    // delete user's trades in memory + DB
+    const tradesToDelete = [];
+    for (let i = trades.length - 1; i >= 0; i--) {
+      if (trades[i].fromId === id || trades[i].toId === id) {
+        tradesToDelete.push(trades[i].id);
+        trades.splice(i, 1);
+      }
+    }
+    await Promise.all(
+      tradesToDelete.map((tid) => deleteTradeFromDB(tid))
+    );
+
+    broadcastState();
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("delete user error:", e);
+    res.status(500).json({ error: "server error" });
   }
-
-  broadcastState(); // + save
-  res.json({ ok: true });
-});
-
-
-// reset user password
-app.patch("/api/admin/users/:id/password", (req, res) => {
-  const pass = req.query.password;
-  if (pass !== ADMIN_PASSWORD) {
-    return res.status(403).json({ error: "forbidden" });
-  }
-  const id = req.params.id;
-  const user = usersById[id];
-  if (!user) {
-    return res.status(404).json({ error: "user not found" });
-  }
-
-  const { newPassword } = req.body || {};
-  if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
-    return res.status(400).json({ error: "הסיסמה חייבת להיות לפחות 6 תווים" });
-  }
-
-  user.password = newPassword;
-  user.lastSeenAt = user.lastSeenAt || now();
-  scheduleSaveToDisk();
-
-  res.json({ ok: true, user: safeUser(user) });
 });
 
 // delete trade
-app.delete("/api/admin/trades/:id", (req, res) => {
-  const pass = req.query.password;
-  if (pass !== ADMIN_PASSWORD) {
-    return res.status(403).json({ error: "forbidden" });
+app.delete("/api/admin/trades/:id", async (req, res) => {
+  try {
+    const pass = req.query.password;
+    if (pass !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const id = req.params.id;
+    const idx = trades.findIndex((t) => t.id === id);
+    if (idx === -1) {
+      return res.status(404).json({ error: "trade not found" });
+    }
+    trades.splice(idx, 1);
+    await deleteTradeFromDB(id);
+    broadcastState();
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("delete trade error:", e);
+    res.status(500).json({ error: "server error" });
   }
-  const id = req.params.id;
-  const idx = trades.findIndex((t) => t.id === id);
-  if (idx === -1) {
-    return res.status(404).json({ error: "trade not found" });
+});
+
+// reset user password
+app.patch("/api/admin/users/:id/password", async (req, res) => {
+  try {
+    const pass = req.query.password;
+    if (pass !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const id = req.params.id;
+    const user = usersById[id];
+    if (!user) {
+      return res.status(404).json({ error: "user not found" });
+    }
+
+    const { newPassword } = req.body || {};
+    if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
+      return res.status(400).json({ error: "הסיסמה חייבת להיות לפחות 6 תווים" });
+    }
+
+    user.password = newPassword;
+    user.lastSeenAt = user.lastSeenAt || now();
+    await saveUserToDB(user);
+
+    res.json({ ok: true, user: safeUser(user) });
+  } catch (e) {
+    console.error("reset password error:", e);
+    res.status(500).json({ error: "server error" });
   }
-  trades.splice(idx, 1);
-  broadcastState(); // + save
-  res.json({ ok: true });
 });
 
 // ===== Socket.IO =====
@@ -549,10 +580,15 @@ io.on("connection", (socket) => {
   console.log("client connected", socket.id);
   socket.emit("state:update", stateSnapshot());
 
-  socket.on("pong:client-alive", (userId) => {
-    if (userId && usersById[userId]) {
-      usersById[userId].lastSeenAt = now();
-      // לא חובה לשמור כל פינג, זה רק ל־online ב־admin, אז לא קורא scheduleSaveToDisk כאן
+  socket.on("pong:client-alive", async (userId) => {
+    try {
+      if (userId && usersById[userId]) {
+        usersById[userId].lastSeenAt = now();
+        // נשמור מדי פעם גם בפיירבייס (אם תרצה אפשר לדלל את זה)
+        await saveUserToDB(usersById[userId]);
+      }
+    } catch (e) {
+      console.error("pong save error:", e);
     }
   });
 
@@ -562,9 +598,18 @@ io.on("connection", (socket) => {
 });
 
 // ===== startup =====
-loadStateFromDisk();
+async function start() {
+  try {
+    await loadStateFromFirebase();
+  } catch (e) {
+    console.error("Failed to load initial state from Firebase:", e);
+    // נמשיך בכל זאת, פשוט נתחיל ריק
+  }
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log("ITS A DEAL v11 listening on http://localhost:" + PORT);
-});
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, () => {
+    console.log("ITS A DEAL v12 (Firebase) listening on http://localhost:" + PORT);
+  });
+}
+
+start();
