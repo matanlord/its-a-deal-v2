@@ -1,5 +1,6 @@
 const express = require("express");
 const path = require("path");
+const fs = require("fs");
 const http = require("http");
 const { Server } = require("socket.io");
 const PDFDocument = require("pdfkit");
@@ -18,13 +19,108 @@ app.use(express.json());
 const publicDir = path.join(__dirname, "public");
 app.use(express.static(publicDir));
 
-// ===== data model =====
+// ===== persistence (disk) =====
+const DATA_FILE = path.join(__dirname, "data.json");
+
 // usersById: {
 //   [id]: { id, name, password, joinedAt, lastSeenAt, deviceId }
 // }
 // trades:   { id, fromId, toId, give, take, status, createdAt, decidedAt }
 const usersById = {};
 const trades = [];
+
+// load state from disk on startup
+function loadStateFromDisk() {
+  try {
+    if (!fs.existsSync(DATA_FILE)) {
+      console.log("No existing data.json, starting with empty state");
+      return;
+    }
+    const raw = fs.readFileSync(DATA_FILE, "utf8");
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+
+    // clear current in-memory state
+    for (const k of Object.keys(usersById)) {
+      delete usersById[k];
+    }
+    trades.splice(0, trades.length);
+
+    if (parsed && parsed.usersById && typeof parsed.usersById === "object") {
+      for (const [id, user] of Object.entries(parsed.usersById)) {
+        usersById[id] = user;
+      }
+    }
+    if (parsed && Array.isArray(parsed.trades)) {
+      parsed.trades.forEach((t) => trades.push(t));
+    }
+
+    console.log(
+      "Loaded state from data.json:",
+      Object.keys(usersById).length,
+      "users,",
+      trades.length,
+      "trades"
+    );
+  } catch (e) {
+    console.error("Failed to load state from disk:", e);
+  }
+}
+
+let saveTimer = null;
+
+// async save (debounced) – כדי לא לכתוב לדיסק אלף פעם בשנייה
+function scheduleSaveToDisk() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    saveStateToDisk();
+  }, 500);
+}
+
+function saveStateToDisk() {
+  const payload = {
+    usersById,
+    trades
+  };
+  const json = JSON.stringify(payload, null, 2);
+  const tmpFile = DATA_FILE + ".tmp";
+  fs.writeFile(tmpFile, json, "utf8", (err) => {
+    if (err) {
+      console.error("Failed to write state tmp file:", err);
+      return;
+    }
+    fs.rename(tmpFile, DATA_FILE, (err2) => {
+      if (err2) {
+        console.error("Failed to move tmp -> data.json:", err2);
+      } else {
+        // console.log("State saved to", DATA_FILE);
+      }
+    });
+  });
+}
+
+// sync save on process exit – למקרה של כיבוי מסודר
+function saveStateSyncOnExit() {
+  try {
+    const payload = { usersById, trades };
+    fs.writeFileSync(DATA_FILE, JSON.stringify(payload, null, 2), "utf8");
+    console.log("State saved sync on shutdown");
+  } catch (e) {
+    console.error("Failed to save state sync on shutdown:", e);
+  }
+}
+
+process.on("SIGINT", () => {
+  saveStateSyncOnExit();
+  process.exit(0);
+});
+process.on("SIGTERM", () => {
+  saveStateSyncOnExit();
+  process.exit(0);
+});
+
+// ===== helpers =====
 
 function now() {
   return Date.now();
@@ -54,6 +150,7 @@ function stateSnapshot() {
 
 function broadcastState() {
   io.emit("state:update", stateSnapshot());
+  scheduleSaveToDisk(); // כל שינוי גלובלי נשמר גם לדיסק
 }
 
 // ===== REST API =====
@@ -90,6 +187,7 @@ app.post("/api/join", (req, res) => {
         .json({ error: "השם הזה כבר קיים עם סיסמה אחרת" });
     }
     existing.lastSeenAt = now();
+    scheduleSaveToDisk(); // נשמור גם את ה-lastSeenAt שנכנס מהלוגין
     const out = safeUser(existing);
     out.isNew = false;
     return res.json(out);
@@ -118,12 +216,11 @@ app.post("/api/join", (req, res) => {
   };
   usersById[id] = user;
 
-  broadcastState();
+  broadcastState(); // כולל scheduleSaveToDisk
   const out = safeUser(user);
   out.isNew = true;
   res.json(out);
 });
-
 
 // device status by deviceId – used by client to reset wrong first user after admin delete
 app.get("/api/device-status", (req, res) => {
@@ -131,7 +228,7 @@ app.get("/api/device-status", (req, res) => {
   if (!deviceId) {
     return res.status(400).json({ error: "missing deviceId" });
   }
-  const user = Object.values(usersById).find(u => u.deviceId === deviceId);
+  const user = Object.values(usersById).find((u) => u.deviceId === deviceId);
   res.json({ user: safeUser(user) });
 });
 
@@ -160,17 +257,17 @@ app.post("/api/trades", (req, res) => {
     toId,
     give: String(give).trim(),
     take: String(take).trim(),
-    status: "OPEN", // OPEN | ACCEPTED | DECLINED | CANCELLED | BROKEN
+    status: "OPEN", // OPEN | ACCEPTED | DECLINED | CANCELLED | BROKEN | DONE
     createdAt: now(),
     decidedAt: null
   };
 
   trades.push(trade);
-  broadcastState();
+  broadcastState(); // + save
   res.json(trade);
 });
 
-// update trade status (accept / decline / cancel / break)
+// update trade status (accept / decline / cancel / break / done)
 app.patch("/api/trades/:id", (req, res) => {
   const tradeId = req.params.id;
   const { action, requesterId } = req.body || {};
@@ -302,10 +399,16 @@ app.get("/api/trades/:id/pdf", (req, res) => {
   doc.restore();
 
   doc.fillColor("#000000").fontSize(12);
-  doc.text("תאריך יצירת הדיל: " + new Date(trade.createdAt).toLocaleString("he-IL"), marginLeft + 6, infoTop, {
-    align: "right",
-    width: boxWidth - 12
-  });
+  doc.text(
+    "תאריך יצירת הדיל: " +
+      new Date(trade.createdAt).toLocaleString("he-IL"),
+    marginLeft + 6,
+    infoTop,
+    {
+      align: "right",
+      width: boxWidth - 12
+    }
+  );
   doc.moveDown(0.5);
   doc.text("צד א' (המציע): " + fromName, {
     align: "right",
@@ -396,7 +499,7 @@ app.delete("/api/admin/users/:id", (req, res) => {
     }
   }
 
-  broadcastState();
+  broadcastState(); // + save
   res.json({ ok: true });
 });
 
@@ -412,7 +515,7 @@ app.delete("/api/admin/trades/:id", (req, res) => {
     return res.status(404).json({ error: "trade not found" });
   }
   trades.splice(idx, 1);
-  broadcastState();
+  broadcastState(); // + save
   res.json({ ok: true });
 });
 
@@ -424,6 +527,7 @@ io.on("connection", (socket) => {
   socket.on("pong:client-alive", (userId) => {
     if (userId && usersById[userId]) {
       usersById[userId].lastSeenAt = now();
+      // לא חובה לשמור כל פינג, זה רק ל־online ב־admin, אז לא קורא scheduleSaveToDisk כאן
     }
   });
 
@@ -431,6 +535,9 @@ io.on("connection", (socket) => {
     console.log("client disconnected", socket.id);
   });
 });
+
+// ===== startup =====
+loadStateFromDisk();
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
