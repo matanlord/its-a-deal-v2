@@ -111,20 +111,10 @@
       tdStatus.textContent = isOnline(u) ? "מחובר עכשיו" : "לא מחובר";
 
       const tdActions = document.createElement("td");
-
-      const resetBtn = document.createElement("button");
-      resetBtn.className = "btn small";
-      resetBtn.textContent = "איפוס סיסמה";
-      resetBtn.onclick = () => resetUserPassword(u.id);
-
       const delBtn = document.createElement("button");
       delBtn.className = "btn small reject";
       delBtn.textContent = "מחק";
       delBtn.onclick = () => deleteUser(u.id);
-
-      tdActions.appendChild(resetBtn);
-      tdActions.appendChild(document.createTextNode(" "));
-
       tdActions.appendChild(delBtn);
 
       tr.appendChild(tdName);
@@ -204,33 +194,6 @@
       method: "DELETE"
     });
     loadAdminData();
-  }
-
-  async function resetUserPassword(id) {
-    const newPass = prompt("הכנס סיסמה חדשה למשתמש (לפחות 6 תווים):");
-    if (newPass === null) return;
-    if (newPass.length < 6) {
-      alert("הסיסמה חייבת להיות לפחות 6 תווים.");
-      return;
-    }
-
-    const res = await fetch("/api/admin/users/" + id + "/password?password=" + encodeURIComponent(adminPassword), {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ newPassword: newPass })
-    });
-
-    if (!res.ok) {
-      let msg = "שגיאה באיפוס סיסמה.";
-      try {
-        const data = await res.json();
-        if (data && data.error) msg += "\n" + data.error;
-      } catch (e) {}
-      alert(msg);
-      return;
-    }
-
-    alert("הסיסמה אופסה בהצלחה. עדכן את המשתמש בסיסמה החדשה.");
   }
 
   async function deleteTrade(id) {

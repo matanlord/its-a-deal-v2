@@ -1,7 +1,7 @@
 {
   "name": "its-a-deal-v11",
-  "version": "1.12.0",
-  "description": "ITS A DEAL \u2013 Firebase-backed persistence for users & trades.",
+  "version": "1.14.0",
+  "description": "ITS A DEAL \u2013 Firebase persistence with filtered trades and broken-deals ticker.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

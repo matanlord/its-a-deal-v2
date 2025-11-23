@@ -23,7 +23,7 @@ try {
   if (appOptions) {
     admin.initializeApp(appOptions);
   } else {
-    // ינסה להשתמש ב־Application Default Credentials אם קיימים
+    // ינסה להשתמש ב־Application Default Credentials אם קיימים (למשל ב-GCP)
     admin.initializeApp();
   }
 } catch (e) {
@@ -45,7 +45,7 @@ app.use(express.json());
 const publicDir = path.join(__dirname, "public");
 app.use(express.static(publicDir));
 
-// ===== in-memory state (sync עם Firebase) =====
+// ===== in-memory state (מסונכרן עם Firebase) =====
 
 // usersById: {
 //   [id]: { id, name, password, joinedAt, lastSeenAt, deviceId }
@@ -66,19 +66,17 @@ async function loadStateFromFirebase() {
   const usersSnap = await db.collection("users").get();
   usersSnap.forEach((doc) => {
     const data = doc.data();
-    if (data && data.id) {
-      usersById[data.id] = data;
-    } else {
-      // אם אין שדה id בגוף, נשתמש ב-id של המסמך
-      const u = { ...data, id: doc.id };
-      usersById[u.id] = u;
-    }
+    if (!data) return;
+    const u = { ...data };
+    if (!u.id) u.id = doc.id;
+    usersById[u.id] = u;
   });
 
   const tradesSnap = await db.collection("trades").get();
   tradesSnap.forEach((doc) => {
     const data = doc.data();
-    if (data && data.id) {
+    if (!data || !data.id) return;
+    if (shouldPersistTrade(data)) {
       trades.push(data);
     }
   });
@@ -88,7 +86,7 @@ async function loadStateFromFirebase() {
     Object.keys(usersById).length,
     "users,",
     trades.length,
-    "trades"
+    "trades (filtered)"
   );
 }
 
@@ -100,8 +98,31 @@ async function deleteUserFromDB(id) {
   await db.collection("users").doc(id).delete();
 }
 
+// לוגיקת סינון – אילו סטטוסים נשמרים ב-DB
+function shouldPersistTrade(trade) {
+  // נשמור רק:
+  // - OPEN  (דיל פתוח בהמתנה לאישור)
+  // - ACCEPTED (דיל שקיבלו אותו ועדיין בהמתנה לביצוע)
+  // - BROKEN (דיל ששברו אותו, כדי שיהיה תיעוד)
+  //
+  // לא נשמור / נמחק:
+  // - DECLINED (נדחה)
+  // - DONE (הסתיים)
+  // - CANCELLED (בוטל)
+  const st = trade.status;
+  return st === "OPEN" || st === "ACCEPTED" || st === "BROKEN";
+}
+
 async function saveTradeToDB(trade) {
   await db.collection("trades").doc(trade.id).set(trade, { merge: true });
+}
+
+async function upsertOrDeleteTradeInDB(trade) {
+  if (shouldPersistTrade(trade)) {
+    await saveTradeToDB(trade);
+  } else {
+    await deleteTradeFromDB(trade.id);
+  }
 }
 
 async function deleteTradeFromDB(id) {
@@ -136,8 +157,26 @@ function stateSnapshot() {
   };
 }
 
+// בחירת עד 3 דילים “שבורים” אחרונים לטיקר
+function computeBrokenTicker() {
+  const broken = trades.filter(
+    (t) => t.status === "BROKEN" && typeof t.decidedAt === "number"
+  );
+  if (!broken.length) return [];
+
+  const nowMs = now();
+  const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
+
+  const recent = broken.filter((t) => nowMs - t.decidedAt <= twoDaysMs);
+  const base = (recent.length ? recent : broken).slice();
+  base.sort((a, b) => b.decidedAt - a.decidedAt); // חדש → ישן
+
+  return base.slice(0, 3);
+}
+
 function broadcastState() {
   io.emit("state:update", stateSnapshot());
+  io.emit("ticker:update", computeBrokenTicker());
 }
 
 // ===== REST API =====
@@ -257,7 +296,7 @@ app.post("/api/trades", async (req, res) => {
     };
 
     trades.push(trade);
-    await saveTradeToDB(trade);
+    await upsertOrDeleteTradeInDB(trade); // OPEN -> נשמר
     broadcastState();
     res.json(trade);
   } catch (e) {
@@ -295,7 +334,7 @@ app.patch("/api/trades/:id", async (req, res) => {
       }
       trade.status = "BROKEN";
       trade.decidedAt = now();
-      await saveTradeToDB(trade);
+      await upsertOrDeleteTradeInDB(trade); // BROKEN -> נשמר
       broadcastState();
       return res.json(trade);
     }
@@ -313,27 +352,27 @@ app.patch("/api/trades/:id", async (req, res) => {
       }
       trade.status = "DONE";
       trade.decidedAt = now();
-      await saveTradeToDB(trade);
+      await upsertOrDeleteTradeInDB(trade); // DONE -> יימחק מה-DB
       broadcastState();
       return res.json(trade);
     }
 
-    // שאר הפעולות (accept / decline / cancel) אפשר לשמור כמו קודם
+    // accept / decline / cancel
     if (trade.status !== "OPEN") {
       return res.status(400).json({ error: "trade already decided" });
     }
 
     if (action === "accept") {
-      trade.status = "ACCEPTED";
+      trade.status = "ACCEPTED"; // נשמר ב-DB
     } else if (action === "decline") {
-      trade.status = "DECLINED";
+      trade.status = "DECLINED"; // יימחק מה-DB
     } else if (action === "cancel") {
-      trade.status = "CANCELLED";
+      trade.status = "CANCELLED"; // יימחק מה-DB
     }
 
     trade.decidedAt = now();
 
-    await saveTradeToDB(trade);
+    await upsertOrDeleteTradeInDB(trade);
     broadcastState();
     res.json(trade);
   } catch (e) {
@@ -579,12 +618,12 @@ app.patch("/api/admin/users/:id/password", async (req, res) => {
 io.on("connection", (socket) => {
   console.log("client connected", socket.id);
   socket.emit("state:update", stateSnapshot());
+  socket.emit("ticker:update", computeBrokenTicker());
 
   socket.on("pong:client-alive", async (userId) => {
     try {
       if (userId && usersById[userId]) {
         usersById[userId].lastSeenAt = now();
-        // נשמור מדי פעם גם בפיירבייס (אם תרצה אפשר לדלל את זה)
         await saveUserToDB(usersById[userId]);
       }
     } catch (e) {
@@ -603,12 +642,12 @@ async function start() {
     await loadStateFromFirebase();
   } catch (e) {
     console.error("Failed to load initial state from Firebase:", e);
-    // נמשיך בכל זאת, פשוט נתחיל ריק
+    // נתחיל עם מצב ריק אם יש בעיה
   }
 
   const PORT = process.env.PORT || 3000;
   server.listen(PORT, () => {
-    console.log("ITS A DEAL v12 (Firebase) listening on http://localhost:" + PORT);
+    console.log("ITS A DEAL v14 (Firebase + filtered trades + ticker) listening on http://localhost:" + PORT);
   });
 }
 

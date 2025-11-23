@@ -14,6 +14,9 @@
   let currentUserId = null;
   let users = [];
   let trades = [];
+  let brokenTickerItems = [];
+  let tickerIndex = 0;
+  let tickerTimer = null;
 
   window.addEventListener("load", () => {
     // ----- deviceId generation -----
@@ -237,6 +240,18 @@
         renderScoreboard();
       });
 
+      socket.on("ticker:update", (list) => {
+        if (!Array.isArray(list)) {
+          brokenTickerItems = [];
+        } else {
+          brokenTickerItems = list.slice(0, 3);
+        }
+        tickerIndex = 0;
+        updateTickerDisplay();
+      });
+
+      setupTickerRotation();
+
       // ping server so lastSeenAt is updated (for admin "online" view)
       setInterval(() => {
         if (socket && currentUserId) {
@@ -244,6 +259,39 @@
         }
       }, 15000);
     }
+
+
+function computeTickerText(t) {
+  const fromName = getUserName(t.fromId) || "צד א'";
+  const toName = getUserName(t.toId) || "צד ב'";
+  const timeStr = t.decidedAt ? new Date(t.decidedAt).toLocaleString("he-IL") : "";
+  return `[${timeStr}] דיל נשבר בין ${fromName} ל-${toName} | ${t.give} ↔ ${t.take}`;
+}
+
+function updateTickerDisplay() {
+  const bar = document.getElementById("newsTicker");
+  if (!bar) return;
+  if (!brokenTickerItems.length) {
+    bar.innerHTML = "";
+    bar.style.display = "none";
+    return;
+  }
+  bar.style.display = "";
+  const t = brokenTickerItems[tickerIndex % brokenTickerItems.length];
+  const text = computeTickerText(t);
+  bar.innerHTML = `<div class="tick">${text}</div>`;
+}
+
+function setupTickerRotation() {
+  if (tickerTimer) {
+    clearInterval(tickerTimer);
+  }
+  tickerTimer = setInterval(() => {
+    if (!brokenTickerItems.length) return;
+    tickerIndex = (tickerIndex + 1) % brokenTickerItems.length;
+    updateTickerDisplay();
+  }, 10 * 60 * 1000); // כל 10 דקות מחליפים דיל בטיקר
+}
 
     function syncUsersSelects() {
       const dealTargetSelect = document.getElementById("dealTargetSelect");
