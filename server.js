@@ -503,6 +503,31 @@ app.delete("/api/admin/users/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+
+// reset user password
+app.patch("/api/admin/users/:id/password", (req, res) => {
+  const pass = req.query.password;
+  if (pass !== ADMIN_PASSWORD) {
+    return res.status(403).json({ error: "forbidden" });
+  }
+  const id = req.params.id;
+  const user = usersById[id];
+  if (!user) {
+    return res.status(404).json({ error: "user not found" });
+  }
+
+  const { newPassword } = req.body || {};
+  if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
+    return res.status(400).json({ error: "הסיסמה חייבת להיות לפחות 6 תווים" });
+  }
+
+  user.password = newPassword;
+  user.lastSeenAt = user.lastSeenAt || now();
+  scheduleSaveToDisk();
+
+  res.json({ ok: true, user: safeUser(user) });
+});
+
 // delete trade
 app.delete("/api/admin/trades/:id", (req, res) => {
   const pass = req.query.password;
